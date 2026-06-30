@@ -1,0 +1,100 @@
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from app.core.deps import get_current_user
+from app.database import get_db
+from app.models import Prediction, User
+from app.schemas import PredictRequest, PredictResponse
+from app.services.prediction_service import run_prediction
+
+router = APIRouter(prefix="/predictions", tags=["Predictions"])
+
+
+def _label(score: float) -> str:
+    if score < 0.30:
+        return "Low"
+    if score < 0.60:
+        return "Moderate"
+    return "Elevated"
+
+
+@router.post("", response_model=PredictResponse, status_code=201)
+def predict(
+    body: PredictRequest,
+    db: Session = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    score, label = run_prediction(body)
+
+    rec = Prediction(
+        user_id=me.id,
+        age=body.age,
+        bmi=body.bmi,
+        sleep_duration=body.sleep_duration,
+        sleep_time=body.sleep_time,
+        wake_time=body.wake_time,
+        chronotype=body.chronotype,
+        ethnicity=body.ethnicity,
+        family_history=body.family_history,
+        prediction_value=score,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    return PredictResponse(
+        prediction=score,
+        risk_label=label,
+        message="score generated",
+        prediction_id=rec.id,
+    )
+
+
+@router.get("", response_model=List[PredictResponse])
+def list_predictions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    rows = (
+        db.query(Prediction)
+        .filter(Prediction.user_id == me.id)
+        .order_by(Prediction.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return [
+        PredictResponse(
+            prediction=r.prediction_value,
+            risk_label=_label(r.prediction_value),
+            message="",
+            prediction_id=r.id,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/{pid}", response_model=PredictResponse)
+def get_prediction(
+    pid: str,
+    db: Session = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    rec = db.query(Prediction).filter(
+        Prediction.id == pid,
+        Prediction.user_id == me.id,
+    ).first()
+
+    if not rec:
+        raise HTTPException(status_code=404, detail="prediction not found")
+
+    return PredictResponse(
+        prediction=rec.prediction_value,
+        risk_label=_label(rec.prediction_value),
+        message="",
+        prediction_id=rec.id,
+    )
