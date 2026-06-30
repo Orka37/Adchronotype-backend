@@ -9,4 +9,7 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 slowapi==0.1.9
 pandas==2.2.2
+numpy==1.26.4
+xgboost==2.0.3
 python-dotenv==1.0.1
+scikit-learn==1.4.2
