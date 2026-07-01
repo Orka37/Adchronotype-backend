@@ -5,10 +5,15 @@ from app.core.config import get_settings
 
 cfg = get_settings()
 
-# pool_pre_ping=True drops stale connections before handing them out —
-# caught a bunch of "server closed connection" errors without this
+# strip any sslmode param and force disable —
+# Railway's public proxy doesn't use SSL
+db_url = cfg.DATABASE_URL
+if "?" in db_url:
+    db_url = db_url.split("?")[0]
+db_url = db_url + "?sslmode=disable"
+
 engine = create_engine(
-    cfg.DATABASE_URL,
+    db_url,
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
