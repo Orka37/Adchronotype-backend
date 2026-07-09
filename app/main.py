@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -9,12 +11,22 @@ from app.core.config import get_settings
 from app.routers import auth, caregivers, cognitive_tests, predictions, sleep_logs, users
 
 cfg = get_settings()
-
 limiter = Limiter(key_func=get_remote_address)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # runs once on startup — safe because create_all uses IF NOT EXISTS
+    from app.database import engine, Base
+    import app.models  # noqa — ensures all models are registered
+    Base.metadata.create_all(bind=engine)
+    yield
+
 
 app = FastAPI(
     title="ADChronotype API",
     version="1.0.0",
+    lifespan=lifespan,
     docs_url=None if cfg.is_production else "/docs",
     redoc_url=None if cfg.is_production else "/redoc",
 )
@@ -24,7 +36,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten to your domain after launch
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

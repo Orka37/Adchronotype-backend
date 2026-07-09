@@ -6,18 +6,10 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models import Prediction, User
-from app.schemas import PredictRequest, PredictResponse
+from app.schemas import PredictRequest, PredictResponse, FactorContributions
 from app.services.prediction_service import run_prediction
 
 router = APIRouter(prefix="/predictions", tags=["Predictions"])
-
-
-def _label(score: float) -> str:
-    if score < 0.30:
-        return "Low"
-    if score < 0.60:
-        return "Moderate"
-    return "Elevated"
 
 
 @router.post("", response_model=PredictResponse, status_code=201)
@@ -26,7 +18,12 @@ def predict(
     db: Session = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
-    score, label = run_prediction(body)
+    result = run_prediction(body)
+
+    score    = result["score"]
+    label    = result["risk_label"]
+    baseline = result["baseline"]
+    fc       = result["factor_contributions"]
 
     rec = Prediction(
         user_id=me.id,
@@ -49,6 +46,8 @@ def predict(
         risk_label=label,
         message="score generated",
         prediction_id=rec.id,
+        baseline=baseline,
+        factor_contributions=FactorContributions(**fc),
     )
 
 

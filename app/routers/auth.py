@@ -17,6 +17,12 @@ from app.schemas import (
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Precomputed valid bcrypt hash used for constant-time comparison when a
+# username/email is not found. Computed once at import so it is always a
+# well-formed bcrypt string (a hand-written placeholder is not, and makes
+# passlib raise "malformed bcrypt hash" instead of returning False).
+_DUMMY_HASH = _pwd.hash("account-not-found-timing-safe-placeholder")
 cfg  = get_settings()
 
 
@@ -72,9 +78,13 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         (User.email == body.emailOrUsername) | (User.username == body.emailOrUsername)
     ).first()
 
-    # timing-safe: always run bcrypt even on missing user
-    dummy = "$2b$12$KIXnotarealhashjustpaddingtomatchbcryptlength00000000000"
-    pw_ok = _pwd.verify(body.password, user.password_hash if user else dummy)
+    # timing-safe: always run bcrypt even on missing user.
+    # Guard against malformed/corrupt stored hashes so a bad hash yields a
+    # clean 401 instead of a 500 (passlib raises ValueError on bad hashes).
+    try:
+        pw_ok = _pwd.verify(body.password, user.password_hash if user else _DUMMY_HASH)
+    except ValueError:
+        pw_ok = False
 
     if not user or not pw_ok:
         raise HTTPException(status_code=401, detail="incorrect credentials")

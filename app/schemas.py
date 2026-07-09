@@ -74,11 +74,22 @@ class PredictRequest(BaseModel):
     sleep_duration: float = Field(..., ge=0.0, le=24.0)
 
 
+class FactorContributions(BaseModel):
+    chronotype: float
+    age:        float
+    bmi:        float
+    sleep_time: float
+    wake_time:  float
+    ethnicity:  float
+
+
 class PredictResponse(BaseModel):
-    prediction:    float
-    risk_label:    str
-    message:       str
-    prediction_id: UUID
+    prediction:           float
+    risk_label:           str
+    message:              str
+    prediction_id:        UUID
+    baseline:             Optional[float] = None
+    factor_contributions: Optional[FactorContributions] = None
 
 
 # ── sleep logs ────────────────────────────────────────────────────
