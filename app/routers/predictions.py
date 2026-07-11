@@ -14,6 +14,29 @@ router = APIRouter(prefix="/predictions", tags=["Predictions"])
 logger = logging.getLogger("adchronotype.predictions")
 
 
+def _response_from_prediction(row: Prediction) -> PredictResponse:
+    body = PredictRequest(
+        age=row.age,
+        bmi=row.bmi,
+        ethnicity=row.ethnicity,
+        chronotype=row.chronotype,
+        family_history=row.family_history,
+        sleep_time=row.sleep_time,
+        wake_time=row.wake_time,
+        sleep_duration=row.sleep_duration,
+    )
+    result = run_prediction(body)
+
+    return PredictResponse(
+        prediction=row.prediction_value,
+        risk_label=risk_label_for_score(row.prediction_value),
+        message="",
+        prediction_id=row.id,
+        baseline=result["baseline"],
+        factor_contributions=FactorContributions(**result["factor_contributions"]),
+    )
+
+
 @router.post("", response_model=PredictResponse, status_code=201)
 def predict(
     body: PredictRequest,
@@ -76,15 +99,7 @@ def list_predictions(
         .limit(page_size)
         .all()
     )
-    return [
-        PredictResponse(
-            prediction=r.prediction_value,
-            risk_label=risk_label_for_score(r.prediction_value),
-            message="",
-            prediction_id=r.id,
-        )
-        for r in rows
-    ]
+    return [_response_from_prediction(row) for row in rows]
 
 
 @router.get("/{pid}", response_model=PredictResponse)
@@ -101,9 +116,4 @@ def get_prediction(
     if not rec:
         raise HTTPException(status_code=404, detail="prediction not found")
 
-    return PredictResponse(
-        prediction=rec.prediction_value,
-        risk_label=risk_label_for_score(rec.prediction_value),
-        message="",
-        prediction_id=rec.id,
-    )
+    return _response_from_prediction(rec)
