@@ -1,4 +1,5 @@
 from typing import List
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,6 +12,7 @@ from app.models import CognitiveTest, User
 from app.schemas import CogTestIn, CogTestOut
 
 router = APIRouter(prefix="/cognitive-tests", tags=["Cognitive Tests"])
+logger = logging.getLogger("adchronotype.cognitive_tests")
 
 
 @router.post("", response_model=CogTestOut, status_code=201)
@@ -30,6 +32,13 @@ def submit_result(
     db.add(rec)
     db.commit()
     db.refresh(rec)
+    logger.info(
+        "cognitive_test_saved user_id=%s cognitive_test_id=%s test_type=%s score=%s",
+        me.id,
+        rec.id,
+        rec.test_type,
+        rec.score,
+    )
     return rec
 
 

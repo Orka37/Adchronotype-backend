@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from passlib.context import CryptContext
@@ -15,6 +16,7 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+logger = logging.getLogger("adchronotype.auth")
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -69,6 +71,8 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
+    logger.info("user_signed_up user_id=%s username=%s", user.id, user.username)
+
     return AuthResponse(user=_pub(user), tokens=_issue(user, db))
 
 
@@ -87,11 +91,14 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         pw_ok = False
 
     if not user or not pw_ok:
+        logger.info("login_failed identifier_type=%s", "email" if "@" in body.emailOrUsername else "username")
         raise HTTPException(status_code=401, detail="incorrect credentials")
 
     if not user.is_active:
+        logger.info("login_blocked_disabled user_id=%s", user.id)
         raise HTTPException(status_code=403, detail="account disabled")
 
+    logger.info("user_logged_in user_id=%s", user.id)
     return AuthResponse(user=_pub(user), tokens=_issue(user, db))
 
 
@@ -117,6 +124,7 @@ def refresh_tokens(body: RefreshRequest, db: Session = Depends(get_db)):
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="user not found")
 
+    logger.info("token_refreshed user_id=%s", user.id)
     return _issue(user, db)
 
 
@@ -130,6 +138,7 @@ def logout(
     if row and not row.revoked:
         row.revoked = True
         db.commit()
+        logger.info("user_logged_out user_id=%s", row.user_id)
 
 
 @router.get("/check-username", response_model=UsernameCheckResponse)

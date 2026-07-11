@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
@@ -9,6 +11,7 @@ from app.schemas import ChangePwRequest, PublicUser, UpdateProfileRequest
 
 router = APIRouter(prefix="/users", tags=["Users"])
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+logger = logging.getLogger("adchronotype.users")
 
 
 def _pub(u: User) -> PublicUser:
@@ -34,6 +37,7 @@ def update_me(
 
     db.commit()
     db.refresh(me)
+    logger.info("profile_updated user_id=%s", me.id)
     return _pub(me)
 
 
@@ -48,3 +52,4 @@ def change_password(
 
     me.password_hash = _pwd.hash(body.new_password)
     db.commit()
+    logger.info("password_changed user_id=%s", me.id)

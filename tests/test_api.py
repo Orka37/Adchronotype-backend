@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import app.main as main_module
 from app.database import Base, get_db
 from app.main import app
 
@@ -38,6 +39,7 @@ def db():
 
 @pytest.fixture()
 def client(db):
+    main_module.engine = _engine
     app.dependency_overrides[get_db] = lambda: db
     with TestClient(app) as c:
         yield c
@@ -64,7 +66,7 @@ def headers(client, tag="u"):
 # ── health ────────────────────────────────────────────────────────
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok", "database": "ok"}
 
 
 # ── signup ────────────────────────────────────────────────────────
@@ -153,8 +155,8 @@ def test_get_profile(client):
     assert r.json()["username"] == "user_prof1"
 
 
-def test_no_token_gives_403(client):
-    assert client.get("/users/me").status_code == 403
+def test_no_token_gives_401(client):
+    assert client.get("/users/me").status_code == 401
 
 
 def test_update_name(client):

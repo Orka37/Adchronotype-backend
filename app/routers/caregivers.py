@@ -1,4 +1,5 @@
 from typing import List
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,7 @@ from app.models import CaregiverLink, User
 from app.schemas import CaregiverInvite, CaregiverLinkOut
 
 router = APIRouter(prefix="/caregivers", tags=["Caregivers"])
+logger = logging.getLogger("adchronotype.caregivers")
 
 
 @router.post("/invite", response_model=CaregiverLinkOut, status_code=201)
@@ -40,6 +42,12 @@ def invite(
     db.add(link)
     db.commit()
     db.refresh(link)
+    logger.info(
+        "caregiver_invite_created patient_id=%s caregiver_link_id=%s status=%s",
+        me.id,
+        link.id,
+        link.status,
+    )
     return link
 
 
@@ -81,3 +89,4 @@ def revoke(
 
     link.status = "revoked"
     db.commit()
+    logger.info("caregiver_link_revoked patient_id=%s caregiver_link_id=%s", me.id, link_id)

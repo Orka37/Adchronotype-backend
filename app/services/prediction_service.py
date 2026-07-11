@@ -106,14 +106,18 @@ def _risk_label(score: float) -> str:
     return "Elevated"
 
 
+def risk_label_for_score(score: float) -> str:
+    return _risk_label(score)
+
+
 def run_prediction(req: PredictRequest) -> dict:
     features = _build_row(req)
 
-    # ── 1. Main score ──────────────────────────────────────────────
+    #1. Main score 
     raw   = float(_model.predict(features)[0])
     score = _normalise(raw)
 
-    # ── 2. SHAP factor contributions ───────────────────────────────
+    #2. SHAP factor contributions 
     shap_values  = _explainer(features).values[0]            # shape (n_features,)
     feature_map  = dict(zip(_COLS, shap_values))
 
@@ -121,7 +125,7 @@ def run_prediction(req: PredictRequest) -> dict:
         """Sum SHAP values for the given feature keys and normalise to %."""
         return round(float(sum(feature_map.get(k, 0.0) for k in keys) / _MAX_SCORE * 100), 1)
 
-    # ── 3. Baseline ────────────────────────────────────────────────
+    #3. Baseline 
     # expected_value = model's average prediction across all training data
     # add in SHAP for "inactive" features (ones the user didn't trigger)
     # and for family history + sleep duration, which we treat as baseline components

@@ -106,7 +106,7 @@ class CaregiverLink(Base):
 
     id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     patient_id   = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
-    caregiver_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    caregiver_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     # invited_email lets us handle the case where the caregiver hasn't signed up yet
     invited_email = Column(String(255), nullable=True)
     status       = Column(String(20), nullable=False, default="pending")  # pending | active | revoked

@@ -8,13 +8,20 @@ from app.core.security import decode_access_token
 from app.database import get_db
 from app.models import User
 
-_scheme = HTTPBearer()
+_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(_scheme),
     db: Session = Depends(get_db),
 ) -> User:
+    if creds is None or not creds.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     uid = decode_access_token(creds.credentials.strip())
 
     if uid is None:

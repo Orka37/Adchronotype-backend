@@ -1,4 +1,5 @@
 from typing import List
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -7,9 +8,10 @@ from app.core.deps import get_current_user
 from app.database import get_db
 from app.models import Prediction, User
 from app.schemas import PredictRequest, PredictResponse, FactorContributions
-from app.services.prediction_service import run_prediction
+from app.services.prediction_service import risk_label_for_score, run_prediction
 
 router = APIRouter(prefix="/predictions", tags=["Predictions"])
+logger = logging.getLogger("adchronotype.predictions")
 
 
 @router.post("", response_model=PredictResponse, status_code=201)
@@ -41,6 +43,14 @@ def predict(
     db.commit()
     db.refresh(rec)
 
+    logger.info(
+        "prediction_created user_id=%s prediction_id=%s score=%s risk=%s",
+        me.id,
+        rec.id,
+        score,
+        label,
+    )
+
     return PredictResponse(
         prediction=score,
         risk_label=label,
@@ -69,7 +79,7 @@ def list_predictions(
     return [
         PredictResponse(
             prediction=r.prediction_value,
-            risk_label=_label(r.prediction_value),
+            risk_label=risk_label_for_score(r.prediction_value),
             message="",
             prediction_id=r.id,
         )
@@ -93,7 +103,7 @@ def get_prediction(
 
     return PredictResponse(
         prediction=rec.prediction_value,
-        risk_label=_label(rec.prediction_value),
+        risk_label=risk_label_for_score(rec.prediction_value),
         message="",
         prediction_id=rec.id,
     )

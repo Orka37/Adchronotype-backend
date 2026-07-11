@@ -21,10 +21,10 @@ FastAPI backend for the ADChronotype brain health prediction app.
    - `APP_ENV` → `production`
    - `DATABASE_URL` → auto-filled by Render from the linked database
 
-7. After first deploy, run the table creation once:
+7. After first deploy, run migrations:
    ```
    # In Render dashboard → Shell tab
-   python create_tables.py
+   alembic upgrade head
    ```
    Then copy the `ml_model.pkl` file into the root of your repo.
 
@@ -37,8 +37,10 @@ FastAPI backend for the ADChronotype brain health prediction app.
 2. `railway login`
 3. `railway init` (inside this folder)
 4. `railway add` → add a PostgreSQL plugin
-5. Set env vars: `railway variables set JWT_SECRET_KEY=... APP_ENV=production`
+5. Set env vars: `railway variables set JWT_SECRET_KEY=... APP_ENV=production FRONTEND_ORIGINS=https://your-frontend-domain.com`
 6. `railway up`
+
+Railway runs `alembic upgrade head` before starting the API, using the command in `railway.json`.
 
 ## Local development
 
@@ -47,7 +49,7 @@ cp .env.example .env
 # fill in your local postgres DATABASE_URL and a JWT_SECRET_KEY
 
 pip install -r requirements.txt
-python create_tables.py
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -63,3 +65,14 @@ API docs available at http://localhost:8000/docs in development.
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | default 60 | Access token lifetime |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | default 30 | Refresh token lifetime |
 | `APP_ENV` | default development | Set to `production` on server |
+| `FRONTEND_ORIGINS` | production | Comma-separated allowed frontend origins |
+| `RUN_MIGRATIONS_ON_STARTUP` | default false | Optional fallback for running migrations during app startup |
+
+## Production checklist
+
+- Set `APP_ENV=production`.
+- Set a stable `JWT_SECRET_KEY`; changing it logs out every user.
+- Set `FRONTEND_ORIGINS` to the deployed frontend URL.
+- Run `alembic upgrade head` before the API accepts traffic.
+- Confirm `/health` returns `{"status":"ok","database":"ok"}`.
+- Run `pytest -q` before deployment.

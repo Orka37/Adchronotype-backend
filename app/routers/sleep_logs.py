@@ -1,4 +1,5 @@
 from typing import List
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,6 +11,7 @@ from app.models import SleepLog, User
 from app.schemas import SleepLogIn, SleepLogOut
 
 router = APIRouter(prefix="/sleep-logs", tags=["Sleep Logs"])
+logger = logging.getLogger("adchronotype.sleep_logs")
 
 
 @router.post("", response_model=SleepLogOut, status_code=201)
@@ -31,6 +33,13 @@ def create_log(
     db.add(rec)
     db.commit()
     db.refresh(rec)
+    logger.info(
+        "sleep_log_created user_id=%s sleep_log_id=%s logged_date=%s duration_hours=%s",
+        me.id,
+        rec.id,
+        rec.logged_date.date(),
+        rec.duration_hours,
+    )
     return rec
 
 
@@ -83,3 +92,4 @@ def delete_log(
 
     db.delete(rec)
     db.commit()
+    logger.info("sleep_log_deleted user_id=%s sleep_log_id=%s", me.id, log_id)
