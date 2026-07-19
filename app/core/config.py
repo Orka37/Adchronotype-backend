@@ -27,10 +27,18 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self):
-        origins = [origin.strip() for origin in self.FRONTEND_ORIGINS.split(",") if origin.strip()]
-        if origins:
-            return origins
-        return [] if self.is_production else ["*"]
+        origins = [origin.strip().rstrip("/") for origin in self.FRONTEND_ORIGINS.split(",") if origin.strip()]
+        if self.FRONTEND_APP_URL:
+            origins.append(self.FRONTEND_APP_URL.strip().rstrip("/"))
+        return sorted(set(origins))
+
+    @property
+    def cors_origin_regex(self):
+        if not self.is_production and not self.cors_origins:
+            return r".*"
+        # Local preview ports are safe to allow explicitly and prevent Railway test previews
+        # from breaking every time the frontend server starts on a new port.
+        return r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
 
 # cached so we don't re-read .env on every request
