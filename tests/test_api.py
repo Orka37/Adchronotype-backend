@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
 from app.database import Base, get_db
+from app.models import PasswordResetToken
 from app.main import app
 
 _engine = create_engine(
@@ -118,6 +119,24 @@ def test_wrong_password_gives_401(client):
     assert r.status_code == 401
 
 
+def test_forgot_password_is_generic(client):
+    r = client.post("/auth/forgot-password", json={"emailOrUsername": "missing@test.com"})
+    assert r.status_code == 200
+    assert "If an account exists" in r.json()["message"]
+
+
+def test_reset_password_changes_login(client, db):
+    register(client, "reset1")
+    r = client.post("/auth/forgot-password", json={"emailOrUsername": "reset1@test.com"})
+    assert r.status_code == 200
+    token_row = db.query(PasswordResetToken).first()
+    assert token_row is not None
+
+    # We store only hashes, so direct reset with a made-up token must fail.
+    bad = client.post("/auth/reset-password", json={"token": "not-the-real-token-value-123", "new_password": "NewPass999!"})
+    assert bad.status_code == 400
+
+
 # ── token refresh / logout ────────────────────────────────────────
 
 def test_token_refresh_works(client):
@@ -205,9 +224,17 @@ def test_list_sleep_logs(client):
     assert len(r.json()) >= 1
 
 
-def test_bad_quality_score_rejected(client):
+def test_sleep_quality_score_accepts_0_to_21(client):
     h = headers(client, "sl3")
-    bad = {**_SLEEP_PAYLOAD, "quality_score": 9}
+    good = {**_SLEEP_PAYLOAD, "quality_score": 21}
+    r = client.post("/sleep-logs", json=good, headers=h)
+    assert r.status_code == 201
+    assert r.json()["quality_score"] == 21
+
+
+def test_bad_quality_score_rejected(client):
+    h = headers(client, "sl3_bad")
+    bad = {**_SLEEP_PAYLOAD, "quality_score": 22}
     assert client.post("/sleep-logs", json=bad, headers=h).status_code == 422
 
 

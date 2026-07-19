@@ -25,6 +25,7 @@ class User(Base):
     sleep_logs     = relationship("SleepLog",     back_populates="user", cascade="all, delete-orphan")
     cognitive_tests = relationship("CognitiveTest", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
     caregiver_links = relationship(
         "CaregiverLink",
         foreign_keys="CaregiverLink.patient_id",
@@ -45,6 +46,19 @@ class RefreshToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="refresh_tokens")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id    = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at    = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", back_populates="password_reset_tokens")
 
 
 class Prediction(Base):
@@ -77,7 +91,7 @@ class SleepLog(Base):
     sleep_time     = Column(String(10), nullable=False)
     wake_time      = Column(String(10), nullable=False)
     duration_hours = Column(Float,   nullable=False)
-    quality_score  = Column(Integer, nullable=False)   # 1–5
+    quality_score  = Column(Integer, nullable=False)   # 0-21
     awakenings     = Column(Integer, nullable=False, default=0)
     notes          = Column(Text, nullable=True)
     logged_date    = Column(DateTime(timezone=True), nullable=False)

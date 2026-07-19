@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    PASSWORD_RESET_EXPIRE_MINUTES: int = 30
+    RESEND_API_KEY: str = ""
+    PASSWORD_RESET_FROM_EMAIL: str = ""
+    FRONTEND_APP_URL: str = ""
     APP_ENV: str = "development"
     FRONTEND_ORIGINS: str = ""
     RUN_MIGRATIONS_ON_STARTUP: bool = False

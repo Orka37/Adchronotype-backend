@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 import logging
+import secrets
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from passlib.context import CryptContext
@@ -9,10 +12,12 @@ from app.core.config import get_settings
 from app.core.deps import get_current_user
 from app.core.security import create_access_token, create_refresh_token, decode_refresh_token
 from app.database import get_db
-from app.models import RefreshToken, User
+from app.models import PasswordResetToken, RefreshToken, User
+from app.services.email import send_password_reset_email
 from app.schemas import (
-    AuthResponse, LoginRequest, PublicUser,
-    RefreshRequest, SignupRequest, TokenPair, UsernameCheckResponse,
+    AuthResponse, LoginRequest, MessageResponse, PasswordResetConfirm,
+    PasswordResetRequest, PublicUser, RefreshRequest, SignupRequest,
+    TokenPair, UsernameCheckResponse,
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -26,6 +31,16 @@ _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # passlib raise "malformed bcrypt hash" instead of returning False).
 _DUMMY_HASH = _pwd.hash("account-not-found-timing-safe-placeholder")
 cfg  = get_settings()
+
+
+
+
+def _hash_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _reset_response() -> MessageResponse:
+    return MessageResponse(message="If an account exists, reset instructions will be sent shortly.")
 
 
 def _pub(user: User) -> PublicUser:
@@ -100,6 +115,72 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
     logger.info("user_logged_in user_id=%s", user.id)
     return AuthResponse(user=_pub(user), tokens=_issue(user, db))
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+def forgot_password(body: PasswordResetRequest, db: Session = Depends(get_db)):
+    identifier = body.emailOrUsername.strip()
+    user = db.query(User).filter(
+        (User.email == identifier) | (User.username == identifier)
+    ).first()
+
+    if not user or not user.is_active:
+        logger.info("password_reset_requested missing_or_inactive identifier_type=%s", "email" if "@" in identifier else "username")
+        return _reset_response()
+
+    token = secrets.token_urlsafe(32)
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token_hash=_hash_reset_token(token),
+        expires_at=datetime.now(tz=timezone.utc) + timedelta(minutes=cfg.PASSWORD_RESET_EXPIRE_MINUTES),
+    )
+    db.add(reset_token)
+    db.commit()
+
+    logger.info("password_reset_requested user_id=%s reset_token_id=%s", user.id, reset_token.id)
+
+    if cfg.FRONTEND_APP_URL:
+        reset_url = f"{cfg.FRONTEND_APP_URL.rstrip('/')}/reset-password?{urlencode({'token': token})}"
+        send_password_reset_email(user.email, reset_url)
+    elif not cfg.is_production:
+        logger.warning("password_reset_token_dev user_id=%s token=%s", user.id, token)
+    else:
+        logger.error("password_reset_email_not_sent reason=missing_frontend_app_url user_id=%s", user.id)
+
+    return _reset_response()
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+def reset_password(body: PasswordResetConfirm, db: Session = Depends(get_db)):
+    token_hash = _hash_reset_token(body.token)
+    now = datetime.now(tz=timezone.utc)
+
+    reset_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash,
+        PasswordResetToken.used_at.is_(None),
+        PasswordResetToken.expires_at > now,
+    ).first()
+
+    if not reset_token:
+        logger.info("password_reset_failed invalid_or_expired_token")
+        raise HTTPException(status_code=400, detail="invalid or expired reset token")
+
+    user = db.query(User).filter(User.id == reset_token.user_id).first()
+    if not user or not user.is_active:
+        logger.info("password_reset_failed missing_or_inactive_user token_id=%s", reset_token.id)
+        raise HTTPException(status_code=400, detail="invalid or expired reset token")
+
+    user.password_hash = _pwd.hash(body.new_password)
+    reset_token.used_at = now
+
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user.id,
+        RefreshToken.revoked.is_(False),
+    ).update({"revoked": True}, synchronize_session=False)
+
+    db.commit()
+    logger.info("password_reset_completed user_id=%s reset_token_id=%s", user.id, reset_token.id)
+    return MessageResponse(message="Password has been reset. Please log in with your new password.")
 
 
 @router.post("/refresh", response_model=TokenPair)

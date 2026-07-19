@@ -49,6 +49,19 @@ class UsernameCheckResponse(BaseModel):
     available: bool
 
 
+class PasswordResetRequest(BaseModel):
+    emailOrUsername: str = Field(..., min_length=3, max_length=255)
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(..., min_length=20, max_length=256)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 # ── user profile ──────────────────────────────────────────────────
 
 class UpdateProfileRequest(BaseModel):
@@ -98,7 +111,7 @@ class SleepLogIn(BaseModel):
     sleep_time:     str     = Field(..., pattern=r"^\d{2}:\d{2}$")
     wake_time:      str     = Field(..., pattern=r"^\d{2}:\d{2}$")
     duration_hours: float   = Field(..., ge=0.0, le=24.0)
-    quality_score:  int     = Field(..., ge=1, le=5)
+    quality_score:  int     = Field(..., ge=0, le=21)
     awakenings:     int     = Field(0, ge=0, le=20)
     notes:          Optional[str] = Field(None, max_length=500)
     logged_date:    datetime
