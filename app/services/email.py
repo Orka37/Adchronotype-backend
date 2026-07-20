@@ -36,6 +36,7 @@ def send_password_reset_email(to_email: str, reset_url: str) -> bool:
         headers={
             "Authorization": f"Bearer {settings.RESEND_API_KEY}",
             "Content-Type": "application/json",
+            "User-Agent": "ADChronotype/1.0 (password-reset)",
         },
         method="POST",
     )
