@@ -138,6 +138,7 @@ _VALID_TESTS = {"reaction", "digit_span", "memory", "stroop"}
 
 class CogTestIn(BaseModel):
     test_type:        str
+    attempt_number:   int = Field(1, ge=1)
     score:            float = Field(..., ge=0.0)
     unit:             str
     duration_seconds: Optional[float] = Field(None, ge=0.0)
@@ -154,6 +155,7 @@ class CogTestIn(BaseModel):
 class CogTestOut(BaseModel):
     id:               UUID
     test_type:        str
+    attempt_number:   int
     score:            float
     unit:             str
     duration_seconds: Optional[float]

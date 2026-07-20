@@ -1,4 +1,5 @@
 from typing import List
+from datetime import timedelta
 import logging
 from uuid import UUID
 
@@ -13,6 +14,48 @@ from app.schemas import CogTestIn, CogTestOut
 
 router = APIRouter(prefix="/cognitive-tests", tags=["Cognitive Tests"])
 logger = logging.getLogger("adchronotype.cognitive_tests")
+VALID_TEST_TYPES = {"reaction", "digit_span", "memory", "stroop"}
+RETAKE_GAP_DAYS = 7
+
+
+def _latest_completed_attempt(db: Session, user_id):
+    attempt_rows = (
+        db.query(
+            CognitiveTest.attempt_number,
+            func.count(func.distinct(CognitiveTest.test_type)).label("test_count"),
+            func.max(CognitiveTest.tested_at).label("completed_at"),
+        )
+        .filter(CognitiveTest.user_id == user_id)
+        .group_by(CognitiveTest.attempt_number)
+        .order_by(CognitiveTest.attempt_number.desc())
+        .all()
+    )
+    return next((row for row in attempt_rows if row.test_count >= len(VALID_TEST_TYPES)), None)
+
+
+@router.get("/status")
+def cognitive_status(
+    db: Session = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    latest = _latest_completed_attempt(db, me.id)
+    if not latest:
+        return {
+            "can_start": True,
+            "next_attempt_number": 1,
+            "last_completed_attempt": None,
+            "next_available_at": None,
+        }
+
+    next_available_at = latest.completed_at + timedelta(days=RETAKE_GAP_DAYS)
+    can_start = func.now() is not None and next_available_at <= db.query(func.now()).scalar()
+    return {
+        "can_start": can_start,
+        "next_attempt_number": latest.attempt_number + 1,
+        "last_completed_attempt": latest.attempt_number,
+        "last_completed_at": latest.completed_at,
+        "next_available_at": next_available_at,
+    }
 
 
 @router.post("", response_model=CogTestOut, status_code=201)
@@ -21,9 +64,20 @@ def submit_result(
     db: Session = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
+    latest = _latest_completed_attempt(db, me.id)
+    if latest and body.attempt_number > latest.attempt_number:
+        next_available_at = latest.completed_at + timedelta(days=RETAKE_GAP_DAYS)
+        now = db.query(func.now()).scalar()
+        if now < next_available_at:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Cognitive tests can be retaken after {next_available_at.date().isoformat()}.",
+            )
+
     rec = CognitiveTest(
         user_id=me.id,
         test_type=body.test_type,
+        attempt_number=body.attempt_number,
         score=body.score,
         unit=body.unit,
         duration_seconds=body.duration_seconds,
@@ -33,9 +87,10 @@ def submit_result(
     db.commit()
     db.refresh(rec)
     logger.info(
-        "cognitive_test_saved user_id=%s cognitive_test_id=%s test_type=%s score=%s",
+        "cognitive_test_saved user_id=%s cognitive_test_id=%s attempt=%s test_type=%s score=%s",
         me.id,
         rec.id,
+        rec.attempt_number,
         rec.test_type,
         rec.score,
     )

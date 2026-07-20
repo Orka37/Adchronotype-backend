@@ -106,6 +106,7 @@ class CognitiveTest(Base):
     id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id          = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     test_type        = Column(String(50), nullable=False)   # reaction | digit_span | memory | stroop
+    attempt_number   = Column(Integer, nullable=False, default=1)
     score            = Column(Float, nullable=False)
     unit             = Column(String(20), nullable=False)
     duration_seconds = Column(Float, nullable=True)
