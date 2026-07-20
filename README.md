@@ -9,38 +9,15 @@ FastAPI backend for the ADChronotype brain health prediction app.
 - XGBoost prediction model
 - Rate limiting via slowapi
 
-## Deploy to Render (recommended — free tier works)
+## Deploy to Railway
 
-1. Push this folder to a GitHub repo
-2. Go to https://render.com → New → Web Service
-3. Connect your GitHub repo
-4. Render auto-detects the `render.yaml` — click **Apply**
-5. It creates the PostgreSQL database and web service automatically
-6. Set these environment variables in Render dashboard:
-   - `JWT_SECRET_KEY` — generate with: `python -c "import secrets; print(secrets.token_hex(32))"`
-   - `APP_ENV` → `production`
-   - `DATABASE_URL` → auto-filled by Render from the linked database
+1. Push this folder to GitHub.
+2. In Railway, connect the GitHub repository to the backend service.
+3. Attach a PostgreSQL database service.
+4. Set the required environment variables in the Railway service settings.
+5. Deploy the service.
 
-7. After first deploy, run migrations:
-   ```
-   # In Render dashboard → Shell tab
-   alembic upgrade head
-   ```
-   Then copy the `ml_model.pkl` file into the root of your repo.
-
-8. Your API is live at:
-   `https://adchronotype-api.onrender.com`
-
-## Deploy to Railway (alternative)
-
-1. Install Railway CLI: `npm install -g @railway/cli`
-2. `railway login`
-3. `railway init` (inside this folder)
-4. `railway add` → add a PostgreSQL plugin
-5. Set env vars: `railway variables set JWT_SECRET_KEY=... APP_ENV=production FRONTEND_ORIGINS=https://your-frontend-domain.com`
-6. `railway up`
-
-Railway runs `alembic upgrade head` before starting the API, using the command in `railway.json`.
+Railway runs database migrations before starting the API by using the command in `railway.json`.
 
 ## Local development
 
@@ -66,6 +43,9 @@ API docs available at http://localhost:8000/docs in development.
 | `REFRESH_TOKEN_EXPIRE_DAYS` | default 30 | Refresh token lifetime |
 | `APP_ENV` | default development | Set to `production` on server |
 | `FRONTEND_ORIGINS` | production | Comma-separated allowed frontend origins |
+| `FRONTEND_APP_URL` | password reset | Public frontend URL used in password reset email links |
+| `RESEND_API_KEY` | password reset email | Resend API key for sending password reset emails |
+| `PASSWORD_RESET_FROM_EMAIL` | password reset email | Verified sender, for example `ADChronotype <onboarding@resend.dev>` |
 | `RUN_MIGRATIONS_ON_STARTUP` | default false | Optional fallback for running migrations during app startup |
 
 ## Production checklist
@@ -73,6 +53,8 @@ API docs available at http://localhost:8000/docs in development.
 - Set `APP_ENV=production`.
 - Set a stable `JWT_SECRET_KEY`; changing it logs out every user.
 - Set `FRONTEND_ORIGINS` to the deployed frontend URL.
+- Set `FRONTEND_APP_URL` to the deployed frontend URL.
+- Set `RESEND_API_KEY` and `PASSWORD_RESET_FROM_EMAIL` before testing password reset emails.
 - Run `alembic upgrade head` before the API accepts traffic.
 - Confirm `/health` returns `{"status":"ok","database":"ok"}`.
 - Run `pytest -q` before deployment.
