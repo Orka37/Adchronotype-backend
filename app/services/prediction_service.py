@@ -101,10 +101,6 @@ def _build_row(req: PredictRequest) -> pd.DataFrame:
     return pd.DataFrame([row], columns=_COLS)
 
 
-def _normalise(raw: float) -> float:
-    """Convert raw model output (0–67.37) to a 0–100% score."""
-    return round(float(np.clip(raw / _MAX_SCORE * 100, 0.0, 100.0)), 1)
-
 
 def _risk_label(score: float) -> str:
     if score < 30:
@@ -121,11 +117,7 @@ def risk_label_for_score(score: float) -> str:
 def run_prediction(req: PredictRequest) -> dict:
     features = _build_row(req)
 
-    #1. Main score 
-    raw   = float(_model.predict(features)[0])
-    score = _normalise(raw)
-
-    #2. SHAP factor contributions 
+    #1. SHAP factor contributions 
     shap_values  = _explainer(features).values[0]            # shape (n_features,)
     feature_map  = dict(zip(_COLS, shap_values))
 
@@ -149,18 +141,43 @@ def run_prediction(req: PredictRequest) -> dict:
     duration_shap = feature_map.get("SleepDuration", 0.0)
 
     baseline_raw  = float(_explainer.expected_value)
-    baseline      = round((baseline_raw + family_shap + duration_shap + inactive_shap) / _MAX_SCORE * 100, 1)
+    baseline_raw_with_hidden_factors = baseline_raw + family_shap + duration_shap + inactive_shap
+    baseline = round(baseline_raw_with_hidden_factors / _MAX_SCORE * 100, 1)
+
+    visible_factor_keys = [
+        [f"Chronotype_{req.chronotype}"],
+        ["Age"],
+        ["BMI"],
+        ["SleepTime_sin", "SleepTime_cos"],
+        ["WakeTime_sin", "WakeTime_cos"],
+        [f"Ethnicity_{req.ethnicity}"],
+    ]
+    visible_shap = sum(
+        feature_map.get(key, 0.0)
+        for group in visible_factor_keys
+        for key in group
+    )
+
+    # Keep the displayed score consistent with the displayed baseline + factor table.
+    # This mirrors the Streamlit app while avoiding drift from separately rounded pieces.
+    score = round(float(np.clip(
+        (baseline_raw_with_hidden_factors + visible_shap) / _MAX_SCORE * 100,
+        0.0,
+        100.0,
+    )), 1)
+
+    factor_contributions = {
+        "chronotype": factor_pct([f"Chronotype_{req.chronotype}"]),
+        "age":        factor_pct(["Age"]),
+        "bmi":        factor_pct(["BMI"]),
+        "sleep_time": factor_pct(["SleepTime_sin", "SleepTime_cos"]),
+        "wake_time":  factor_pct(["WakeTime_sin",  "WakeTime_cos"]),
+        "ethnicity":  factor_pct([f"Ethnicity_{req.ethnicity}"]),
+    }
 
     return {
         "score":      score,
         "risk_label": _risk_label(score),
         "baseline":   baseline,
-        "factor_contributions": {
-            "chronotype": factor_pct([f"Chronotype_{req.chronotype}"]),
-            "age":        factor_pct(["Age"]),
-            "bmi":        factor_pct(["BMI"]),
-            "sleep_time": factor_pct(["SleepTime_sin", "SleepTime_cos"]),
-            "wake_time":  factor_pct(["WakeTime_sin",  "WakeTime_cos"]),
-            "ethnicity":  factor_pct([f"Ethnicity_{req.ethnicity}"]),
-        },
+        "factor_contributions": factor_contributions,
     }
