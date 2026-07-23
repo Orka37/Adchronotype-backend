@@ -66,9 +66,17 @@ def _to_angle(t: str) -> float:
     return 2 * math.pi * (h * 60 + m) / 1440
 
 
+def _normalise_family_history(value: str) -> str:
+    if value == "Yes":
+        return "Yes"
+    return "No"
+
+
 def _build_row(req: PredictRequest) -> pd.DataFrame:
     sa = _to_angle(req.sleep_time)
     wa = _to_angle(req.wake_time)
+
+    family_history = _normalise_family_history(req.family_history)
 
     row = {c: 0.0 for c in _COLS}
     row["Age"]           = float(req.age)
@@ -83,12 +91,12 @@ def _build_row(req: PredictRequest) -> pd.DataFrame:
     for prefix, val in [
         ("Chronotype",    req.chronotype),
         ("Ethnicity",     req.ethnicity),
-        ("FamilyHistory", req.family_history),
+        ("FamilyHistory", family_history),
     ]:
         key = f"{prefix}_{val}"
         if key in row:
             row[key] = 1.0
-        # unknown value silently stays 0 — treated as "other"
+        # unknown categorical values stay zero, matching the model's training columns
 
     return pd.DataFrame([row], columns=_COLS)
 
