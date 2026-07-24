@@ -1,9 +1,7 @@
 import math
 import pickle
 from pathlib import Path
-from typing import Optional
 
-import numpy as np
 import pandas as pd
 import shap
 
@@ -66,9 +64,13 @@ def _to_angle(t: str) -> float:
     return 2 * math.pi * (h * 60 + m) / 1440
 
 
+def _to_decimal_hour(t: str) -> float:
+    h, m = map(int, t.split(":"))
+    return h + (m / 60)
+
+
 def _normalise_family_history(value: str) -> str:
-    if value == "Yes":
-        return "Yes"
+    # The Streamlit reference model currently hardcodes family history to "No".
     return "No"
 
 
@@ -85,9 +87,9 @@ def _build_row(req: PredictRequest) -> pd.DataFrame:
     row["SleepTime_cos"] = math.cos(sa)
     row["WakeTime_sin"]  = math.sin(wa)
     row["WakeTime_cos"]  = math.cos(wa)
-    row["SleepDuration"] = req.sleep_duration
+    row["SleepDuration"] = (_to_decimal_hour(req.wake_time) - _to_decimal_hour(req.sleep_time)) % 24
 
-    # one-hot encode categorical fields — reads from real user input
+    # One-hot encode categorical fields in the same column set/order as Streamlit.
     for prefix, val in [
         ("Chronotype",    req.chronotype),
         ("Ethnicity",     req.ethnicity),
@@ -116,8 +118,10 @@ def risk_label_for_score(score: float) -> str:
 
 def run_prediction(req: PredictRequest) -> dict:
     features = _build_row(req)
+    raw_prediction = float(_model.predict(features)[0])
+    score = round(float(min(max(raw_prediction / _MAX_SCORE * 100, 0), 100)), 1)
 
-    #1. SHAP factor contributions 
+    # SHAP factor contributions match the Streamlit reference app.
     shap_values  = _explainer(features).values[0]            # shape (n_features,)
     feature_map  = dict(zip(_COLS, shap_values))
 
@@ -125,10 +129,7 @@ def run_prediction(req: PredictRequest) -> dict:
         """Sum SHAP values for the given feature keys and normalise to %."""
         return round(float(sum(feature_map.get(k, 0.0) for k in keys) / _MAX_SCORE * 100), 1)
 
-    #3. Baseline 
-    # expected_value = model's average prediction across all training data
-    # add in SHAP for "inactive" features (ones the user didn't trigger)
-    # and for family history + sleep duration, which we treat as baseline components
+    # Baseline mirrors Streamlit: expected value plus hidden/input factors.
     inactive_shap = sum(
         feature_map.get(k, 0.0) for k in _ALL_CHRONO
         if k != f"Chronotype_{req.chronotype}"
@@ -140,31 +141,9 @@ def run_prediction(req: PredictRequest) -> dict:
     family_shap   = feature_map.get("FamilyHistory_No", 0.0) + feature_map.get("FamilyHistory_Yes", 0.0)
     duration_shap = feature_map.get("SleepDuration", 0.0)
 
-    baseline_raw  = float(_explainer.expected_value)
+    baseline_raw  = float(round(_explainer.expected_value, 1))
     baseline_raw_with_hidden_factors = baseline_raw + family_shap + duration_shap + inactive_shap
     baseline = round(baseline_raw_with_hidden_factors / _MAX_SCORE * 100, 1)
-
-    visible_factor_keys = [
-        [f"Chronotype_{req.chronotype}"],
-        ["Age"],
-        ["BMI"],
-        ["SleepTime_sin", "SleepTime_cos"],
-        ["WakeTime_sin", "WakeTime_cos"],
-        [f"Ethnicity_{req.ethnicity}"],
-    ]
-    visible_shap = sum(
-        feature_map.get(key, 0.0)
-        for group in visible_factor_keys
-        for key in group
-    )
-
-    # Keep the displayed score consistent with the displayed baseline + factor table.
-    # This mirrors the Streamlit app while avoiding drift from separately rounded pieces.
-    score = round(float(np.clip(
-        (baseline_raw_with_hidden_factors + visible_shap) / _MAX_SCORE * 100,
-        0.0,
-        100.0,
-    )), 1)
 
     factor_contributions = {
         "chronotype": factor_pct([f"Chronotype_{req.chronotype}"]),

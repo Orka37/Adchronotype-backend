@@ -8,7 +8,7 @@ from app.core.deps import get_current_user
 from app.database import get_db
 from app.models import Prediction, User
 from app.schemas import PredictRequest, PredictResponse, FactorContributions
-from app.services.prediction_service import run_prediction
+from app.services.prediction_service import risk_label_for_score, run_prediction
 
 router = APIRouter(prefix="/predictions", tags=["Predictions"])
 logger = logging.getLogger("adchronotype.predictions")
@@ -28,8 +28,8 @@ def _response_from_prediction(row: Prediction) -> PredictResponse:
     result = run_prediction(body)
 
     return PredictResponse(
-        prediction=result["score"],
-        risk_label=result["risk_label"],
+        prediction=row.prediction_value,
+        risk_label=risk_label_for_score(row.prediction_value),
         message="",
         prediction_id=row.id,
         baseline=result["baseline"],
