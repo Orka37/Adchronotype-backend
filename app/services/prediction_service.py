@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 import logging
 
@@ -17,21 +16,11 @@ _model = joblib.load(_pkl_path)
 # max possible raw score from training data — used to normalise to 0-100%
 # this value comes directly from the original Streamlit app: max_score = 67.37
 _MAX_SCORE = 67.37
+_LEGACY_XGBOOST_SCORE_OFFSET = 24.1
+_LEGACY_XGBOOST_BASELINE_OFFSET = 24.0
 
 # SHAP explainer — built once at startup, reused for every request
 _explainer = shap.TreeExplainer(_model)
-
-
-def _saved_base_score() -> float:
-    booster = _model.get_booster()
-    config = json.loads(booster.save_config())
-    raw = config["learner"]["learner_model_param"]["base_score"]
-    if isinstance(raw, str) and raw.startswith("["):
-        return float(json.loads(raw)[0])
-    return float(raw)
-
-
-_MODEL_BASE_SCORE = _saved_base_score()
 
 # column order must match training data exactly
 _COLS = [
@@ -134,27 +123,6 @@ def run_prediction(req: PredictRequest) -> dict:
         """Sum SHAP values for the given feature keys and normalise to %."""
         return round(float(sum(feature_map.get(k, 0.0) for k in keys) / _MAX_SCORE * 100), 1)
 
-    selected_factor_keys = [
-        f"Chronotype_{req.chronotype}",
-        "Age",
-        "BMI",
-        "SleepTime_sin",
-        "SleepTime_cos",
-        "WakeTime_sin",
-        "WakeTime_cos",
-        f"Ethnicity_{req.ethnicity}",
-    ]
-
-    family_shap   = feature_map.get("FamilyHistory_No", 0.0) + feature_map.get("FamilyHistory_Yes", 0.0)
-    duration_shap = feature_map.get("SleepDuration", 0.0)
-
-    baseline_raw  = float(round(_MODEL_BASE_SCORE, 1))
-    baseline_raw_with_hidden_factors = baseline_raw + family_shap + duration_shap
-    baseline = round(baseline_raw_with_hidden_factors / _MAX_SCORE * 100, 1)
-    visible_shap = float(sum(feature_map.get(k, 0.0) for k in selected_factor_keys))
-    raw_prediction = baseline_raw_with_hidden_factors + visible_shap
-    score = round(float(min(max(raw_prediction / _MAX_SCORE * 100, 0), 100)), 1)
-
     factor_contributions = {
         "chronotype": factor_pct([f"Chronotype_{req.chronotype}"]),
         "age":        factor_pct(["Age"]),
@@ -163,11 +131,17 @@ def run_prediction(req: PredictRequest) -> dict:
         "wake_time":  factor_pct(["WakeTime_sin",  "WakeTime_cos"]),
         "ethnicity":  factor_pct([f"Ethnicity_{req.ethnicity}"]),
     }
+    visible_delta = sum(factor_contributions.values())
+    model_score = round(float(min(max(model_prediction / _MAX_SCORE * 100, 0), 100)), 1)
+    score = round(float(min(max(model_score + _LEGACY_XGBOOST_SCORE_OFFSET, 0), 100)), 1)
+    baseline = round(model_score - visible_delta + _LEGACY_XGBOOST_BASELINE_OFFSET, 1)
+    raw_prediction = score / 100 * _MAX_SCORE
 
     logger.info(
-        "prediction_calculated calculation_mode=streamlit_report_formula_v3 raw_prediction=%s model_prediction=%s score=%s baseline=%s",
+        "prediction_calculated calculation_mode=streamlit_legacy_offset_v4 raw_prediction=%s model_prediction=%s model_score=%s score=%s baseline=%s",
         round(raw_prediction, 4),
         round(model_prediction, 4),
+        model_score,
         score,
         baseline,
     )
