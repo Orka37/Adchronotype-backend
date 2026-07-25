@@ -1,7 +1,8 @@
-import pickle
+import json
 from pathlib import Path
 import logging
 
+import joblib
 import numpy as np
 import pandas as pd
 import shap
@@ -11,8 +12,7 @@ from app.schemas import PredictRequest
 _pkl_path = Path(__file__).resolve().parent.parent.parent / "ml_model.pkl"
 logger = logging.getLogger("adchronotype.prediction_service")
 
-with open(_pkl_path, "rb") as fh:
-    _model = pickle.load(fh)
+_model = joblib.load(_pkl_path)
 
 # max possible raw score from training data — used to normalise to 0-100%
 # this value comes directly from the original Streamlit app: max_score = 67.37
@@ -20,6 +20,18 @@ _MAX_SCORE = 67.37
 
 # SHAP explainer — built once at startup, reused for every request
 _explainer = shap.TreeExplainer(_model)
+
+
+def _saved_base_score() -> float:
+    booster = _model.get_booster()
+    config = json.loads(booster.save_config())
+    raw = config["learner"]["learner_model_param"]["base_score"]
+    if isinstance(raw, str) and raw.startswith("["):
+        return float(json.loads(raw)[0])
+    return float(raw)
+
+
+_MODEL_BASE_SCORE = _saved_base_score()
 
 # column order must match training data exactly
 _COLS = [
@@ -113,12 +125,13 @@ def risk_label_for_score(score: float) -> str:
 
 def run_prediction(req: PredictRequest) -> dict:
     features = _build_row(req)
-    raw_prediction = float(_model.predict(features)[0])
-    score = round(float(min(max(raw_prediction / _MAX_SCORE * 100, 0), 100)), 1)
+    model_prediction = float(_model.predict(features)[0])
 
     # SHAP factor contributions match the Streamlit reference app.
     shap_values  = _explainer(features).values[0]            # shape (n_features,)
     feature_map  = dict(zip(_COLS, shap_values))
+    raw_prediction = _MODEL_BASE_SCORE + float(sum(shap_values))
+    score = round(float(min(max(raw_prediction / _MAX_SCORE * 100, 0), 100)), 1)
 
     def factor_pct(keys: list) -> float:
         """Sum SHAP values for the given feature keys and normalise to %."""
@@ -136,7 +149,7 @@ def run_prediction(req: PredictRequest) -> dict:
     family_shap   = feature_map.get("FamilyHistory_No", 0.0) + feature_map.get("FamilyHistory_Yes", 0.0)
     duration_shap = feature_map.get("SleepDuration", 0.0)
 
-    baseline_raw  = float(round(_explainer.expected_value, 1))
+    baseline_raw  = float(round(_MODEL_BASE_SCORE, 1))
     baseline_raw_with_hidden_factors = baseline_raw + family_shap + duration_shap + inactive_shap
     baseline = round(baseline_raw_with_hidden_factors / _MAX_SCORE * 100, 1)
 
@@ -150,8 +163,9 @@ def run_prediction(req: PredictRequest) -> dict:
     }
 
     logger.info(
-        "prediction_calculated calculation_mode=streamlit_model_predict_v1 raw_prediction=%s score=%s baseline=%s",
+        "prediction_calculated calculation_mode=streamlit_shap_additive_v2 raw_prediction=%s model_prediction=%s score=%s baseline=%s",
         round(raw_prediction, 4),
+        round(model_prediction, 4),
         score,
         baseline,
     )

@@ -15,5 +15,6 @@ numpy==1.26.4
 xgboost==2.0.3
 python-dotenv==1.0.1
 scikit-learn==1.4.2
+joblib==1.4.2
 shap==0.45.0
 pytest==8.2.2
