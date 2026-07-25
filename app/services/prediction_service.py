@@ -1,13 +1,15 @@
-import math
 import pickle
 from pathlib import Path
+import logging
 
+import numpy as np
 import pandas as pd
 import shap
 
 from app.schemas import PredictRequest
 
 _pkl_path = Path(__file__).resolve().parent.parent.parent / "ml_model.pkl"
+logger = logging.getLogger("adchronotype.prediction_service")
 
 with open(_pkl_path, "rb") as fh:
     _model = pickle.load(fh)
@@ -58,15 +60,9 @@ _ALL_ETHNICITY = [
 ]
 
 
-def _to_angle(t: str) -> float:
-    """Convert HH:MM to radians so midnight and 23:59 are close together."""
-    h, m = map(int, t.split(":"))
-    return 2 * math.pi * (h * 60 + m) / 1440
-
-
 def _to_decimal_hour(t: str) -> float:
     h, m = map(int, t.split(":"))
-    return h + (m / 60)
+    return h + (m / 60.0)
 
 
 def _normalise_family_history(value: str) -> str:
@@ -75,25 +71,24 @@ def _normalise_family_history(value: str) -> str:
 
 
 def _build_row(req: PredictRequest) -> pd.DataFrame:
-    sa = _to_angle(req.sleep_time)
-    wa = _to_angle(req.wake_time)
-
-    family_history = _normalise_family_history(req.family_history)
+    sleep_numeric = float(_to_decimal_hour(req.sleep_time))
+    wake_numeric = float(_to_decimal_hour(req.wake_time))
+    sleep_hrs = (wake_numeric - sleep_numeric) % 24
 
     row = {c: 0.0 for c in _COLS}
     row["Age"]           = float(req.age)
-    row["BMI"]           = req.bmi
-    row["SleepTime_sin"] = math.sin(sa)
-    row["SleepTime_cos"] = math.cos(sa)
-    row["WakeTime_sin"]  = math.sin(wa)
-    row["WakeTime_cos"]  = math.cos(wa)
-    row["SleepDuration"] = (_to_decimal_hour(req.wake_time) - _to_decimal_hour(req.sleep_time)) % 24
+    row["BMI"]           = float(req.bmi)
+    row["SleepTime_sin"] = np.sin(2 * np.pi * sleep_numeric / 24)
+    row["SleepTime_cos"] = np.cos(2 * np.pi * sleep_numeric / 24)
+    row["WakeTime_sin"]  = np.sin(2 * np.pi * wake_numeric / 24)
+    row["WakeTime_cos"]  = np.cos(2 * np.pi * wake_numeric / 24)
+    row["SleepDuration"] = sleep_hrs
 
     # One-hot encode categorical fields in the same column set/order as Streamlit.
     for prefix, val in [
         ("Chronotype",    req.chronotype),
         ("Ethnicity",     req.ethnicity),
-        ("FamilyHistory", family_history),
+        ("FamilyHistory", _normalise_family_history(req.family_history)),
     ]:
         key = f"{prefix}_{val}"
         if key in row:
@@ -153,6 +148,13 @@ def run_prediction(req: PredictRequest) -> dict:
         "wake_time":  factor_pct(["WakeTime_sin",  "WakeTime_cos"]),
         "ethnicity":  factor_pct([f"Ethnicity_{req.ethnicity}"]),
     }
+
+    logger.info(
+        "prediction_calculated calculation_mode=streamlit_model_predict_v1 raw_prediction=%s score=%s baseline=%s",
+        round(raw_prediction, 4),
+        score,
+        baseline,
+    )
 
     return {
         "score":      score,
