@@ -130,28 +130,30 @@ def run_prediction(req: PredictRequest) -> dict:
     # SHAP factor contributions match the Streamlit reference app.
     shap_values  = _explainer(features).values[0]            # shape (n_features,)
     feature_map  = dict(zip(_COLS, shap_values))
-    raw_prediction = _MODEL_BASE_SCORE + float(sum(shap_values))
-    score = round(float(min(max(raw_prediction / _MAX_SCORE * 100, 0), 100)), 1)
-
     def factor_pct(keys: list) -> float:
         """Sum SHAP values for the given feature keys and normalise to %."""
         return round(float(sum(feature_map.get(k, 0.0) for k in keys) / _MAX_SCORE * 100), 1)
 
-    # Baseline mirrors Streamlit: expected value plus hidden/input factors.
-    inactive_shap = sum(
-        feature_map.get(k, 0.0) for k in _ALL_CHRONO
-        if k != f"Chronotype_{req.chronotype}"
-    )
-    inactive_shap += sum(
-        feature_map.get(k, 0.0) for k in _ALL_ETHNICITY
-        if k != f"Ethnicity_{req.ethnicity}"
-    )
+    selected_factor_keys = [
+        f"Chronotype_{req.chronotype}",
+        "Age",
+        "BMI",
+        "SleepTime_sin",
+        "SleepTime_cos",
+        "WakeTime_sin",
+        "WakeTime_cos",
+        f"Ethnicity_{req.ethnicity}",
+    ]
+
     family_shap   = feature_map.get("FamilyHistory_No", 0.0) + feature_map.get("FamilyHistory_Yes", 0.0)
     duration_shap = feature_map.get("SleepDuration", 0.0)
 
     baseline_raw  = float(round(_MODEL_BASE_SCORE, 1))
-    baseline_raw_with_hidden_factors = baseline_raw + family_shap + duration_shap + inactive_shap
+    baseline_raw_with_hidden_factors = baseline_raw + family_shap + duration_shap
     baseline = round(baseline_raw_with_hidden_factors / _MAX_SCORE * 100, 1)
+    visible_shap = float(sum(feature_map.get(k, 0.0) for k in selected_factor_keys))
+    raw_prediction = baseline_raw_with_hidden_factors + visible_shap
+    score = round(float(min(max(raw_prediction / _MAX_SCORE * 100, 0), 100)), 1)
 
     factor_contributions = {
         "chronotype": factor_pct([f"Chronotype_{req.chronotype}"]),
@@ -163,7 +165,7 @@ def run_prediction(req: PredictRequest) -> dict:
     }
 
     logger.info(
-        "prediction_calculated calculation_mode=streamlit_shap_additive_v2 raw_prediction=%s model_prediction=%s score=%s baseline=%s",
+        "prediction_calculated calculation_mode=streamlit_report_formula_v3 raw_prediction=%s model_prediction=%s score=%s baseline=%s",
         round(raw_prediction, 4),
         round(model_prediction, 4),
         score,
