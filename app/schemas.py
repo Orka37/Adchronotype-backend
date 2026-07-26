@@ -101,6 +101,14 @@ class PredictResponse(BaseModel):
     risk_label:           str
     message:              str
     prediction_id:        UUID
+    age:                  int
+    bmi:                  float
+    ethnicity:            str
+    chronotype:           str
+    family_history:       str
+    sleep_time:           str
+    wake_time:            str
+    sleep_duration:       float
     baseline:             Optional[float] = None
     factor_contributions: Optional[FactorContributions] = None
 
