@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models import User
-from app.schemas import ChangePwRequest, PublicUser, UpdateProfileRequest
+from app.schemas import ChangePwRequest, PublicUser, UpdatePrivacyRequest, UpdateProfileRequest
 
 router = APIRouter(prefix="/users", tags=["Users"])
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -15,8 +15,14 @@ logger = logging.getLogger("adchronotype.users")
 
 
 def _pub(u: User) -> PublicUser:
-    return PublicUser(id=u.id, firstName=u.first_name, lastName=u.last_name,
-                      username=u.username, email=u.email)
+    return PublicUser(
+        id=u.id,
+        firstName=u.first_name,
+        lastName=u.last_name,
+        username=u.username,
+        email=u.email,
+        caregiverSearchEnabled=u.caregiver_search_enabled,
+    )
 
 
 @router.get("/me", response_model=PublicUser)
@@ -38,6 +44,23 @@ def update_me(
     db.commit()
     db.refresh(me)
     logger.info("profile_updated user_id=%s", me.id)
+    return _pub(me)
+
+
+@router.patch("/me/privacy", response_model=PublicUser)
+def update_privacy(
+    body: UpdatePrivacyRequest,
+    db: Session = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    me.caregiver_search_enabled = body.caregiverSearchEnabled
+    db.commit()
+    db.refresh(me)
+    logger.info(
+        "caregiver_search_preference_updated user_id=%s enabled=%s",
+        me.id,
+        me.caregiver_search_enabled,
+    )
     return _pub(me)
 
 

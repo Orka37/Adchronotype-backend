@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import secrets
 from typing import Optional
 
 from jose import JWTError, jwt
@@ -18,6 +19,7 @@ def _make_token(uid: str, kind: str, ttl: timedelta) -> str:
         "type": kind,
         "iat":  now,
         "exp":  now + ttl,
+        "jti":  secrets.token_urlsafe(16),
     }
     return jwt.encode(claims, cfg.JWT_SECRET_KEY, algorithm=cfg.JWT_ALGORITHM)
 

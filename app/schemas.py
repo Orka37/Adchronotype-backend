@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -36,6 +36,7 @@ class PublicUser(BaseModel):
     lastName:  str
     username:  str
     email:     str
+    caregiverSearchEnabled: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -67,6 +68,10 @@ class MessageResponse(BaseModel):
 class UpdateProfileRequest(BaseModel):
     firstName: Optional[str] = Field(None, min_length=1, max_length=100)
     lastName:  Optional[str] = Field(None, min_length=1, max_length=100)
+
+
+class UpdatePrivacyRequest(BaseModel):
+    caregiverSearchEnabled: bool
 
 
 class ChangePwRequest(BaseModel):
@@ -179,6 +184,21 @@ class CaregiverInvite(BaseModel):
     caregiver_email: EmailStr
 
 
+class CaregiverUserOut(BaseModel):
+    id: UUID
+    firstName: str
+    lastName: str
+    username: str
+
+
+class CaregiverSearchResult(CaregiverUserOut):
+    request_status: Optional[str] = None
+
+
+class CaregiverRequestCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+
+
 class CaregiverLinkOut(BaseModel):
     id:            UUID
     patient_id:    UUID
@@ -186,5 +206,30 @@ class CaregiverLinkOut(BaseModel):
     invited_email: Optional[str]
     status:        str
     created_at:    datetime
+    other_user:    Optional[CaregiverUserOut] = None
+
+    model_config = {"from_attributes": True}
+
+
+class CaregiverStatsOut(BaseModel):
+    user: CaregiverUserOut
+    latest_prediction: Optional[PredictResponse] = None
+    cognitive_tests: List[CogTestOut] = Field(default_factory=list)
+    personal_bests: dict = Field(default_factory=dict)
+
+
+class CaregiverMessageCreate(BaseModel):
+    message_key: str = Field(..., min_length=3, max_length=50)
+
+
+class CaregiverMessageOut(BaseModel):
+    id: UUID
+    link_id: UUID
+    sender_id: UUID
+    recipient_id: UUID
+    message_key: str
+    message_text: str
+    read_at: Optional[datetime]
+    created_at: datetime
 
     model_config = {"from_attributes": True}

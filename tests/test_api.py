@@ -285,3 +285,77 @@ def test_filter_by_test_type(client):
         }, headers=h)
     results = client.get("/cognitive-tests?test_type=reaction", headers=h).json()
     assert all(r["test_type"] == "reaction" for r in results)
+
+
+# ── caregiver connections ─────────────────────────────────────────
+
+def _auth_user(client, tag):
+    data = register(client, tag)
+    return data, {"Authorization": f"Bearer {data['tokens']['access_token']}"}
+
+
+def test_caregiver_search_respects_privacy(client):
+    target, target_h = _auth_user(client, "cg_private")
+    _, seeker_h = _auth_user(client, "cg_seeker")
+
+    hidden = client.get("/caregivers/search?username=user_cg_private", headers=seeker_h)
+    assert hidden.status_code == 200
+    assert hidden.json() == []
+
+    client.patch("/users/me/privacy", json={"caregiverSearchEnabled": True}, headers=target_h)
+    visible = client.get("/caregivers/search?username=user_cg_private", headers=seeker_h)
+    assert visible.status_code == 200
+    assert visible.json()[0]["username"] == target["user"]["username"]
+
+
+def test_caregiver_request_accept_and_stats_permission(client):
+    target, target_h = _auth_user(client, "cg_target")
+    requester, requester_h = _auth_user(client, "cg_requester")
+    stranger, stranger_h = _auth_user(client, "cg_stranger")
+
+    client.patch("/users/me/privacy", json={"caregiverSearchEnabled": True}, headers=target_h)
+    created = client.post("/caregivers/requests", json={"username": target["user"]["username"]}, headers=requester_h)
+    assert created.status_code == 201
+    link_id = created.json()["id"]
+
+    blocked = client.get(f"/caregivers/connections/{target['user']['id']}/stats", headers=requester_h)
+    assert blocked.status_code == 403
+
+    incoming = client.get("/caregivers/requests/incoming", headers=target_h)
+    assert incoming.status_code == 200
+    assert incoming.json()[0]["id"] == link_id
+
+    accepted = client.post(f"/caregivers/requests/{link_id}/accept", headers=target_h)
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "accepted"
+
+    stats = client.get(f"/caregivers/connections/{target['user']['id']}/stats", headers=requester_h)
+    assert stats.status_code == 200
+    assert stats.json()["user"]["username"] == target["user"]["username"]
+
+    stranger_blocked = client.get(f"/caregivers/connections/{target['user']['id']}/stats", headers=stranger_h)
+    assert stranger_blocked.status_code == 403
+
+
+def test_caregiver_prebuilt_messages_only(client):
+    target, target_h = _auth_user(client, "cg_msg_target")
+    requester, requester_h = _auth_user(client, "cg_msg_requester")
+
+    client.patch("/users/me/privacy", json={"caregiverSearchEnabled": True}, headers=target_h)
+    link_id = client.post("/caregivers/requests", json={"username": target["user"]["username"]}, headers=requester_h).json()["id"]
+    client.post(f"/caregivers/requests/{link_id}/accept", headers=target_h)
+
+    invalid = client.post(
+        f"/caregivers/connections/{target['user']['id']}/messages",
+        json={"message_key": "custom_free_text"},
+        headers=requester_h,
+    )
+    assert invalid.status_code == 422
+
+    valid = client.post(
+        f"/caregivers/connections/{target['user']['id']}/messages",
+        json={"message_key": "sleep_log_reminder"},
+        headers=requester_h,
+    )
+    assert valid.status_code == 201
+    assert "sleep log" in valid.json()["message_text"].lower()
