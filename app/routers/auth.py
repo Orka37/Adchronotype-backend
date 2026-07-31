@@ -25,10 +25,9 @@ logger = logging.getLogger("adchronotype.auth")
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Precomputed valid bcrypt hash used for constant-time comparison when a
-# username/email is not found. Computed once at import so it is always a
-# well-formed bcrypt string (a hand-written placeholder is not, and makes
-# passlib raise "malformed bcrypt hash" instead of returning False).
+# Precomputed valid bcrypt hash used for constant-time comparison when an
+# account is not found. Keeping this as a real bcrypt hash avoids leaking
+# whether an identifier exists through response timing.
 _DUMMY_HASH = _pwd.hash("account-not-found-timing-safe-placeholder")
 cfg  = get_settings()
 

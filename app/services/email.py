@@ -10,7 +10,7 @@ logger = logging.getLogger("adchronotype.email")
 def send_password_reset_email(to_email: str, reset_url: str) -> bool:
     settings = get_settings()
     if not settings.RESEND_API_KEY or not settings.PASSWORD_RESET_FROM_EMAIL:
-        logger.warning("password_reset_email_skipped reason=missing_resend_config to=%s", to_email)
+        logger.warning("password_reset_email_skipped reason=missing_resend_config")
         return False
 
     payload = {
@@ -45,9 +45,9 @@ def send_password_reset_email(to_email: str, reset_url: str) -> bool:
         with request.urlopen(req, timeout=10) as res:
             ok = 200 <= res.status < 300
             if ok:
-                logger.info("password_reset_email_sent to=%s", to_email)
+                logger.info("password_reset_email_sent")
             else:
-                logger.warning("password_reset_email_failed status=%s to=%s", res.status, to_email)
+                logger.warning("password_reset_email_failed status=%s", res.status)
             return ok
     except error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")

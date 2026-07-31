@@ -67,7 +67,7 @@ def _to_decimal_hour(t: str) -> float:
 
 
 def _normalise_family_history(value: str) -> str:
-    # The Streamlit reference model currently hardcodes family history to "No".
+    # The reference model treats this as a neutral training category.
     return "No"
 
 
