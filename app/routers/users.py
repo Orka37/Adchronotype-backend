@@ -2,11 +2,21 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from passlib.context import CryptContext
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
 from app.database import get_db
-from app.models import User
+from app.models import (
+    CaregiverLink,
+    CaregiverMessage,
+    CognitiveTest,
+    PasswordResetToken,
+    Prediction,
+    RefreshToken,
+    SleepLog,
+    User,
+)
 from app.schemas import ChangePwRequest, PublicUser, UpdatePrivacyRequest, UpdateProfileRequest
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -76,3 +86,56 @@ def change_password(
     me.password_hash = _pwd.hash(body.new_password)
     db.commit()
     logger.info("password_changed user_id=%s", me.id)
+
+
+@router.delete("/me", status_code=204)
+def delete_me(
+    db: Session = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    user_id = me.id
+
+    try:
+        related_links = db.query(CaregiverLink.id).filter(
+            or_(
+                CaregiverLink.patient_id == user_id,
+                CaregiverLink.caregiver_id == user_id,
+            )
+        ).all()
+        related_link_ids = [row.id for row in related_links]
+
+        if related_link_ids:
+            db.query(CaregiverMessage).filter(
+                CaregiverMessage.link_id.in_(related_link_ids)
+            ).delete(synchronize_session=False)
+
+        db.query(CaregiverMessage).filter(
+            or_(
+                CaregiverMessage.sender_id == user_id,
+                CaregiverMessage.recipient_id == user_id,
+            )
+        ).delete(synchronize_session=False)
+
+        db.query(CaregiverLink).filter(
+            or_(
+                CaregiverLink.patient_id == user_id,
+                CaregiverLink.caregiver_id == user_id,
+            )
+        ).delete(synchronize_session=False)
+
+        for model in (
+            CognitiveTest,
+            PasswordResetToken,
+            Prediction,
+            RefreshToken,
+            SleepLog,
+        ):
+            db.query(model).filter(model.user_id == user_id).delete(synchronize_session=False)
+
+        db.delete(me)
+        db.commit()
+        logger.info("account_deleted user_id=%s", user_id)
+    except Exception:
+        db.rollback()
+        logger.exception("account_delete_failed user_id=%s", user_id)
+        raise
