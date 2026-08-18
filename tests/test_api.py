@@ -185,6 +185,35 @@ def test_update_name(client):
     assert r.json()["firstName"] == "NewName"
 
 
+def test_legal_consent_is_account_wide_and_versioned(client):
+    h = headers(client, "consent1")
+    assert client.get("/users/me/legal-consent", headers=h).json() is None
+
+    payload = {
+        "termsVersion": "2026-08-16",
+        "privacyVersion": "2026-08-16",
+        "platform": "web",
+        "appVersion": "1.0.0",
+    }
+    created = client.post("/users/me/legal-consent", json=payload, headers=h)
+    assert created.status_code == 201
+    assert created.json()["termsVersion"] == payload["termsVersion"]
+    assert created.json()["privacyVersion"] == payload["privacyVersion"]
+    assert created.json()["acceptedAt"]
+
+    fetched = client.get("/users/me/legal-consent", headers=h)
+    assert fetched.status_code == 200
+    assert fetched.json()["id"] == created.json()["id"]
+
+    duplicate = client.post("/users/me/legal-consent", json=payload, headers=h)
+    assert duplicate.status_code == 201
+    assert duplicate.json()["id"] == created.json()["id"]
+
+
+def test_legal_consent_requires_authentication(client):
+    assert client.get("/users/me/legal-consent").status_code == 401
+
+
 def test_change_password(client):
     h = headers(client, "cpw1")
     r = client.post("/users/me/change-password",

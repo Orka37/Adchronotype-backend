@@ -11,13 +11,21 @@ from app.models import (
     CaregiverLink,
     CaregiverMessage,
     CognitiveTest,
+    LegalConsent,
     PasswordResetToken,
     Prediction,
     RefreshToken,
     SleepLog,
     User,
 )
-from app.schemas import ChangePwRequest, PublicUser, UpdatePrivacyRequest, UpdateProfileRequest
+from app.schemas import (
+    ChangePwRequest,
+    LegalConsentOut,
+    LegalConsentRequest,
+    PublicUser,
+    UpdatePrivacyRequest,
+    UpdateProfileRequest,
+)
 
 router = APIRouter(prefix="/users", tags=["Users"])
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -35,9 +43,67 @@ def _pub(u: User) -> PublicUser:
     )
 
 
+def _legal_consent(row: LegalConsent) -> LegalConsentOut:
+    return LegalConsentOut(
+        id=row.id,
+        termsVersion=row.terms_version,
+        privacyVersion=row.privacy_version,
+        platform=row.platform,
+        appVersion=row.app_version,
+        acceptedAt=row.accepted_at,
+    )
+
+
 @router.get("/me", response_model=PublicUser)
 def get_me(me: User = Depends(get_current_user)):
     return _pub(me)
+
+
+@router.get("/me/legal-consent", response_model=LegalConsentOut | None)
+def get_legal_consent(
+    db: Session = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    row = (
+        db.query(LegalConsent)
+        .filter(LegalConsent.user_id == me.id)
+        .order_by(LegalConsent.accepted_at.desc())
+        .first()
+    )
+    return _legal_consent(row) if row else None
+
+
+@router.post("/me/legal-consent", response_model=LegalConsentOut, status_code=201)
+def record_legal_consent(
+    body: LegalConsentRequest,
+    db: Session = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    row = db.query(LegalConsent).filter(
+        LegalConsent.user_id == me.id,
+        LegalConsent.terms_version == body.termsVersion,
+        LegalConsent.privacy_version == body.privacyVersion,
+    ).first()
+    if row:
+        return _legal_consent(row)
+
+    row = LegalConsent(
+        user_id=me.id,
+        terms_version=body.termsVersion,
+        privacy_version=body.privacyVersion,
+        platform=body.platform,
+        app_version=body.appVersion,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    logger.info(
+        "legal_consent_recorded user_id=%s terms_version=%s privacy_version=%s",
+        me.id,
+        body.termsVersion,
+        body.privacyVersion,
+    )
+    return _legal_consent(row)
 
 
 @router.patch("/me", response_model=PublicUser)
@@ -125,6 +191,7 @@ def delete_me(
 
         for model in (
             CognitiveTest,
+            LegalConsent,
             PasswordResetToken,
             Prediction,
             RefreshToken,

@@ -79,6 +79,18 @@ class ChangePwRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
 
+class LegalConsentRequest(BaseModel):
+    termsVersion: str = Field(..., min_length=1, max_length=32)
+    privacyVersion: str = Field(..., min_length=1, max_length=32)
+    platform: Optional[str] = Field(None, max_length=32)
+    appVersion: Optional[str] = Field(None, max_length=32)
+
+
+class LegalConsentOut(LegalConsentRequest):
+    id: UUID
+    acceptedAt: datetime
+
+
 # ── predictions ───────────────────────────────────────────────────
 
 class PredictRequest(BaseModel):

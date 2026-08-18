@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -27,6 +27,7 @@ class User(Base):
     cognitive_tests = relationship("CognitiveTest", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
+    legal_consents = relationship("LegalConsent", back_populates="user", cascade="all, delete-orphan")
     caregiver_links = relationship(
         "CaregiverLink",
         foreign_keys="CaregiverLink.patient_id",
@@ -65,6 +66,23 @@ class PasswordResetToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="password_reset_tokens")
+
+
+class LegalConsent(Base):
+    __tablename__ = "legal_consents"
+    __table_args__ = (
+        UniqueConstraint("user_id", "terms_version", "privacy_version", name="uq_legal_consent_versions"),
+    )
+
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id         = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    terms_version   = Column(String(32), nullable=False)
+    privacy_version = Column(String(32), nullable=False)
+    platform        = Column(String(32), nullable=True)
+    app_version     = Column(String(32), nullable=True)
+    accepted_at     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="legal_consents")
 
 
 class Prediction(Base):
