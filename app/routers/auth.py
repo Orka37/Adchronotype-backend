@@ -67,12 +67,11 @@ def _issue(user: User, db: Session) -> TokenPair:
 
 @router.post("/signup", response_model=AuthResponse, status_code=201)
 def signup(body: SignupRequest, db: Session = Depends(get_db)):
-    clash = db.query(User).filter(
-        (User.email == body.email) | (User.username == body.username)
-    ).first()
+    if db.query(User).filter(User.username == body.username).first():
+        raise HTTPException(status_code=409, detail="username already taken")
 
-    if clash:
-        raise HTTPException(status_code=409, detail="email or username taken")
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=409, detail="email already registered")
 
     user = User(
         first_name=body.firstName,

@@ -87,6 +87,18 @@ def test_signup_duplicate_email_gives_409(client):
         "password": "Pass12345!",
     })
     assert r.status_code == 409
+    assert r.json()["detail"] == "email already registered"
+
+
+def test_signup_duplicate_username_gives_specific_409(client):
+    register(client, "dup_username")
+    r = client.post("/auth/signup", json={
+        "firstName": "A", "lastName": "B",
+        "username": "user_dup_username", "email": "different@test.com",
+        "password": "Pass12345!",
+    })
+    assert r.status_code == 409
+    assert r.json()["detail"] == "username already taken"
 
 
 def test_signup_short_password_gives_422(client):
@@ -183,6 +195,34 @@ def test_update_name(client):
     r = client.patch("/users/me", json={"firstName": "NewName"}, headers=h)
     assert r.status_code == 200
     assert r.json()["firstName"] == "NewName"
+
+
+def test_delete_account_allows_reusing_username_and_email(client):
+    original = register(client, "delete_reuse")
+    auth = {"Authorization": f"Bearer {original['tokens']['access_token']}"}
+
+    consent = client.post("/users/me/legal-consent", json={
+        "termsVersion": "2026-08-16",
+        "privacyVersion": "2026-08-16",
+        "platform": "ios",
+        "appVersion": "1.0.0",
+    }, headers=auth)
+    assert consent.status_code == 201
+
+    deleted = client.delete("/users/me", headers=auth)
+    assert deleted.status_code == 204
+    assert client.get("/auth/check-username?username=user_delete_reuse").json()["available"] is True
+
+    recreated = client.post("/auth/signup", json={
+        "firstName": "Recreated", "lastName": "User",
+        "username": "user_delete_reuse", "email": "delete_reuse@test.com",
+        "password": "Pass12345!",
+    })
+    assert recreated.status_code == 201
+    assert recreated.json()["user"]["username"] == "user_delete_reuse"
+
+    recreated_auth = {"Authorization": f"Bearer {recreated.json()['tokens']['access_token']}"}
+    assert client.get("/users/me/legal-consent", headers=recreated_auth).json() is None
 
 
 def test_legal_consent_is_account_wide_and_versioned(client):
