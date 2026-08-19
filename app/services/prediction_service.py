@@ -116,7 +116,7 @@ def run_prediction(req: PredictRequest) -> dict:
     features = _build_row(req)
     model_prediction = float(_model.predict(features)[0])
 
-    # SHAP factor contributions match the Streamlit reference app.
+    # SHAP factor contributions match the Streamlit reference app
     shap_values  = _explainer(features).values[0]            # shape (n_features,)
     feature_map  = dict(zip(_COLS, shap_values))
     def factor_pct(keys: list) -> float:
