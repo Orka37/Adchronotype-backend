@@ -9,7 +9,7 @@ FastAPI backend for the ADChronotype brain health prediction app.
 - XGBoost prediction model
 - Rate limiting via slowapi
 
-## Deploy to Railway
+## Deploy to Railway.
 
 1. Push this folder to GitHub.
 2. In Railway, connect the GitHub repository to the backend service.
