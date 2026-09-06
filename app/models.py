@@ -171,3 +171,164 @@ class CaregiverMessage(Base):
     link      = relationship("CaregiverLink")
     sender    = relationship("User", foreign_keys=[sender_id], back_populates="sent_caregiver_messages")
     recipient = relationship("User", foreign_keys=[recipient_id])
+
+
+class CarePatient(Base):
+    """A care recipient record owned by exactly one primary caregiver."""
+    __tablename__ = "care_patients"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    display_name = Column(String(100), nullable=False)
+    primary_caregiver_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    primary_caregiver = relationship("User", foreign_keys=[primary_caregiver_id])
+    memberships = relationship("CarePatientMember", back_populates="patient", cascade="all, delete-orphan")
+    invitations = relationship("CarePatientInvitation", back_populates="patient", cascade="all, delete-orphan")
+    events = relationship("CarePatientEvent", back_populates="patient", cascade="all, delete-orphan")
+    routine = relationship("CarePatientRoutine", back_populates="patient", cascade="all, delete-orphan", uselist=False)
+    handoff_notes = relationship("CarePatientHandoffNote", back_populates="patient", cascade="all, delete-orphan")
+    medication_schedules = relationship("CarePatientMedicationSchedule", back_populates="patient", cascade="all, delete-orphan")
+    medication_logs = relationship("CarePatientMedicationLog", back_populates="patient", cascade="all, delete-orphan")
+
+
+class CarePatientMember(Base):
+    __tablename__ = "care_patient_members"
+    __table_args__ = (UniqueConstraint("patient_id", "user_id", name="uq_care_patient_member"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("care_patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # primary | helper
+    status = Column(String(20), nullable=False, default="active")  # active | revoked
+    granted_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    patient = relationship("CarePatient", back_populates="memberships")
+    user = relationship("User", foreign_keys=[user_id])
+    granted_by = relationship("User", foreign_keys=[granted_by_user_id])
+
+
+class CarePatientInvitation(Base):
+    __tablename__ = "care_patient_invitations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("care_patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    invited_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    invitee_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
+    invited_email = Column(String(255), nullable=True, index=True)
+    role = Column(String(20), nullable=False, default="helper")
+    status = Column(String(20), nullable=False, default="pending")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    responded_at = Column(DateTime(timezone=True), nullable=True)
+
+    patient = relationship("CarePatient", back_populates="invitations")
+    invited_by = relationship("User", foreign_keys=[invited_by_user_id])
+    invitee = relationship("User", foreign_keys=[invitee_user_id])
+
+
+class CarePatientEvent(Base):
+    """A timestamped observation logged by an authorized caregiver."""
+    __tablename__ = "care_patient_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("care_patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    logged_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type = Column(String(20), nullable=False)
+    event_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    note = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    patient = relationship("CarePatient", back_populates="events")
+    logged_by = relationship("User", foreign_keys=[logged_by_user_id])
+
+
+class CarePatientRoutine(Base):
+    """Care schedule configured by the primary caregiver."""
+    __tablename__ = "care_patient_routines"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("care_patients.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    usual_bedtime = Column(String(5), nullable=False)
+    usual_wake_time = Column(String(5), nullable=False)
+    nap_start_time = Column(String(5), nullable=True)
+    nap_end_time = Column(String(5), nullable=True)
+    notes = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    patient = relationship("CarePatient", back_populates="routine")
+
+
+class CarePatientHandoffNote(Base):
+    """Short shared shift note visible to every active caregiver."""
+    __tablename__ = "care_patient_handoff_notes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("care_patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    author_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    tags = Column(String(255), nullable=False, default="")
+    note = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    patient = relationship("CarePatient", back_populates="handoff_notes")
+    author = relationship("User", foreign_keys=[author_user_id])
+
+
+class CaregiverWellnessCheckIn(Base):
+    """Private self-care check-in owned by one caregiver, never part of a patient record."""
+    __tablename__ = "caregiver_wellness_check_ins"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    feeling = Column(String(20), nullable=False)  # okay | tired | overwhelmed
+    sleep_minutes = Column(Integer, nullable=True)
+    broken_night = Column(Boolean, nullable=False, default=False)
+    note = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class CarePatientMedicationSchedule(Base):
+    """Clinician-established medication timing recorded by a primary caregiver; no dose field by design."""
+    __tablename__ = "care_patient_medication_schedules"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("care_patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    name = Column(String(100), nullable=False)
+    instructions = Column(String(255), nullable=True)
+    window_start = Column(String(5), nullable=False)
+    window_end = Column(String(5), nullable=False)
+    clinician_confirmed = Column(Boolean, nullable=False, default=True)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    patient = relationship("CarePatient", back_populates="medication_schedules")
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+    logs = relationship("CarePatientMedicationLog", back_populates="schedule", cascade="all, delete-orphan")
+
+
+class CarePatientMedicationLog(Base):
+    """Shared record that a scheduled medication was marked taken or skipped."""
+    __tablename__ = "care_patient_medication_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("care_patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    schedule_id = Column(UUID(as_uuid=True), ForeignKey("care_patient_medication_schedules.id", ondelete="CASCADE"), nullable=False, index=True)
+    logged_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(20), nullable=False)  # taken | skipped
+    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    note = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    patient = relationship("CarePatient", back_populates="medication_logs")
+    schedule = relationship("CarePatientMedicationSchedule", back_populates="logs")
+    logged_by = relationship("User", foreign_keys=[logged_by_user_id])

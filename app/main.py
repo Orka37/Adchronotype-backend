@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.database import engine
-from app.routers import auth, caregivers, cognitive_tests, predictions, sleep_logs, users
+from app.routers import auth, care_patients, caregivers, cognitive_tests, predictions, sleep_logs, users
 
 cfg = get_settings()
 limiter = Limiter(key_func=get_remote_address)
@@ -99,6 +99,7 @@ app.include_router(predictions.router)
 app.include_router(sleep_logs.router)
 app.include_router(cognitive_tests.router)
 app.include_router(caregivers.router)
+app.include_router(care_patients.router)
 
 
 @app.get("/", tags=["Health"])

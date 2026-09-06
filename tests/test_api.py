@@ -2,6 +2,8 @@
 Run with:  pytest tests/test_api.py -v
 Uses in-memory SQLite so no Postgres needed locally.
 """
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -428,3 +430,358 @@ def test_caregiver_prebuilt_messages_only(client):
     )
     assert valid.status_code == 201
     assert "sleep log" in valid.json()["message_text"].lower()
+
+
+# ── patient-centered caregiver roles ─────────────────────────────
+
+def test_primary_creates_patient_and_is_only_profile_manager(client):
+    _, primary_h = _auth_user(client, "care_primary")
+    _, helper_h = _auth_user(client, "care_helper")
+
+    created = client.post("/care-patients", json={"display_name": "Mom"}, headers=primary_h)
+    assert created.status_code == 201
+    patient_id = created.json()["id"]
+    assert created.json()["my_role"] == "primary"
+
+    invite = client.post(
+        f"/care-patients/{patient_id}/invitations",
+        json={"username": "user_care_helper"}, headers=primary_h,
+    )
+    assert invite.status_code == 201
+    accepted = client.post(f"/care-patients/invitations/{invite.json()['id']}/accept", headers=helper_h)
+    assert accepted.status_code == 200
+    assert accepted.json()["my_role"] == "helper"
+
+    assert client.get(f"/care-patients/{patient_id}", headers=helper_h).status_code == 200
+    assert client.patch(
+        f"/care-patients/{patient_id}", json={"display_name": "Changed"}, headers=helper_h,
+    ).status_code == 403
+    assert client.post(
+        f"/care-patients/{patient_id}/invitations", json={"email": "another@test.com"}, headers=helper_h,
+    ).status_code == 403
+
+
+def test_revocation_is_immediate_and_primary_cannot_be_removed(client):
+    _, primary_h = _auth_user(client, "revoke_primary")
+    _, helper_h = _auth_user(client, "revoke_helper")
+    patient = client.post("/care-patients", json={"display_name": "Dad"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_revoke_helper"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+    members = client.get(f"/care-patients/{patient['id']}/members", headers=primary_h).json()
+    primary_member = next(row for row in members if row["role"] == "primary")
+    helper_member = next(row for row in members if row["role"] == "helper")
+
+    assert client.delete(
+        f"/care-patients/{patient['id']}/members/{primary_member['id']}", headers=primary_h,
+    ).status_code == 400
+    assert client.delete(
+        f"/care-patients/{patient['id']}/members/{helper_member['id']}", headers=primary_h,
+    ).status_code == 204
+    assert client.get(f"/care-patients/{patient['id']}", headers=helper_h).status_code == 403
+
+
+def test_only_intended_user_can_accept_patient_invitation(client):
+    _, primary_h = _auth_user(client, "invite_primary")
+    _, helper_h = _auth_user(client, "invite_helper")
+    _, stranger_h = _auth_user(client, "invite_stranger")
+    patient = client.post("/care-patients", json={"display_name": "Patient"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_invite_helper"}, headers=primary_h,
+    ).json()
+    assert client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=stranger_h).status_code == 404
+    assert client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h).status_code == 200
+
+
+def test_primary_and_helper_can_log_patient_events(client):
+    _, primary_h = _auth_user(client, "event_primary")
+    _, helper_h = _auth_user(client, "event_helper")
+    patient = client.post("/care-patients", json={"display_name": "Dad"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_event_helper"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+
+    first = client.post(f"/care-patients/{patient['id']}/events", json={
+        "event_type": "slept", "event_time": "2026-01-10T22:30:00Z",
+    }, headers=primary_h)
+    second = client.post(f"/care-patients/{patient['id']}/events", json={
+        "event_type": "woke", "event_time": "2026-01-11T02:15:00Z", "note": "Needed water",
+    }, headers=helper_h)
+    assert first.status_code == 201
+    assert second.status_code == 201
+    rows = client.get(f"/care-patients/{patient['id']}/events", headers=helper_h)
+    assert rows.status_code == 200
+    assert [row["event_type"] for row in rows.json()[:2]] == ["woke", "slept"]
+
+
+def test_patient_event_permissions_and_validation(client):
+    _, primary_h = _auth_user(client, "event_owner")
+    _, helper_h = _auth_user(client, "event_editor")
+    _, stranger_h = _auth_user(client, "event_stranger")
+    patient = client.post("/care-patients", json={"display_name": "Mom"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_event_editor"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+    event = client.post(f"/care-patients/{patient['id']}/events", json={
+        "event_type": "napped", "event_time": "2026-01-11T13:00:00Z",
+    }, headers=primary_h).json()
+
+    assert client.get(f"/care-patients/{patient['id']}/events", headers=stranger_h).status_code == 403
+    assert client.patch(
+        f"/care-patients/{patient['id']}/events/{event['id']}",
+        json={"note": "helper edit"}, headers=helper_h,
+    ).status_code == 403
+    assert client.post(f"/care-patients/{patient['id']}/events", json={
+        "event_type": "invalid", "event_time": "2026-01-11T13:00:00Z",
+    }, headers=primary_h).status_code == 422
+    assert client.post(f"/care-patients/{patient['id']}/events", json={
+        "event_type": "slept", "event_time": "2099-01-11T13:00:00Z",
+    }, headers=primary_h).status_code == 422
+
+
+def test_helper_can_delete_own_event_and_primary_can_delete_any_event(client):
+    _, primary_h = _auth_user(client, "delete_event_primary")
+    _, helper_h = _auth_user(client, "delete_event_helper")
+    patient = client.post("/care-patients", json={"display_name": "Patient"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_delete_event_helper"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+    own = client.post(f"/care-patients/{patient['id']}/events", json={
+        "event_type": "agitated", "event_time": "2026-01-11T01:15:00Z",
+    }, headers=helper_h).json()
+    assert client.delete(f"/care-patients/{patient['id']}/events/{own['id']}", headers=helper_h).status_code == 204
+
+    another = client.post(f"/care-patients/{patient['id']}/events", json={
+        "event_type": "woke", "event_time": "2026-01-11T03:15:00Z",
+    }, headers=helper_h).json()
+    assert client.delete(f"/care-patients/{patient['id']}/events/{another['id']}", headers=primary_h).status_code == 204
+
+
+def test_primary_sets_routine_and_helper_can_view_it(client):
+    _, primary_h = _auth_user(client, "routine_primary")
+    _, helper_h = _auth_user(client, "routine_helper")
+    patient = client.post("/care-patients", json={"display_name": "Dad"}, headers=primary_h).json()
+    patient_id = patient["id"]
+
+    assert client.get(f"/care-patients/{patient_id}/routine", headers=primary_h).json() is None
+    invite = client.post(
+        f"/care-patients/{patient_id}/invitations",
+        json={"username": "user_routine_helper"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+
+    saved = client.put(f"/care-patients/{patient_id}/routine", json={
+        "usual_bedtime": "22:00", "usual_wake_time": "07:00",
+        "nap_start_time": "13:00", "nap_end_time": "14:00", "notes": "Quiet music",
+    }, headers=primary_h)
+    assert saved.status_code == 200
+    assert saved.json()["notes"] == "Quiet music"
+    visible = client.get(f"/care-patients/{patient_id}/routine", headers=helper_h)
+    assert visible.status_code == 200
+    assert visible.json()["usual_bedtime"] == "22:00"
+
+
+def test_helper_cannot_edit_routine_and_routine_validation(client):
+    _, primary_h = _auth_user(client, "routine_owner")
+    _, helper_h = _auth_user(client, "routine_readonly")
+    patient = client.post("/care-patients", json={"display_name": "Mom"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_routine_readonly"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+    payload = {"usual_bedtime": "21:30", "usual_wake_time": "06:30"}
+    assert client.put(f"/care-patients/{patient['id']}/routine", json=payload, headers=helper_h).status_code == 403
+    assert client.put(f"/care-patients/{patient['id']}/routine", json={
+        **payload, "nap_start_time": "13:00",
+    }, headers=primary_h).status_code == 422
+    assert client.put(f"/care-patients/{patient['id']}/routine", json={
+        **payload, "usual_bedtime": "25:00",
+    }, headers=primary_h).status_code == 422
+
+
+def test_caregivers_share_handoff_notes(client):
+    primary, primary_h = _auth_user(client, "handoff_primary")
+    helper, helper_h = _auth_user(client, "handoff_helper")
+    patient = client.post("/care-patients", json={"display_name": "Mom"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_handoff_helper"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+
+    first = client.post(f"/care-patients/{patient['id']}/handoff-notes", json={
+        "tags": ["calm", "ate well"], "note": "Enjoyed breakfast in the kitchen.",
+    }, headers=primary_h)
+    second = client.post(f"/care-patients/{patient['id']}/handoff-notes", json={
+        "tags": ["music helped"], "note": "Quiet music helped at bedtime.",
+    }, headers=helper_h)
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["author"]["id"] == primary["user"]["id"]
+    assert second.json()["author"]["id"] == helper["user"]["id"]
+
+    rows = client.get(f"/care-patients/{patient['id']}/handoff-notes", headers=helper_h)
+    assert rows.status_code == 200
+    assert {tuple(row["tags"]) for row in rows.json()} == {("music helped",), ("calm", "ate well")}
+
+
+def test_handoff_note_permissions_and_validation(client):
+    _, primary_h = _auth_user(client, "handoff_owner")
+    _, helper_h = _auth_user(client, "handoff_editor")
+    _, stranger_h = _auth_user(client, "handoff_stranger")
+    patient = client.post("/care-patients", json={"display_name": "Dad"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_handoff_editor"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+
+    primary_note = client.post(f"/care-patients/{patient['id']}/handoff-notes", json={
+        "tags": ["slept"], "note": "Rested after lunch.",
+    }, headers=primary_h).json()
+    helper_note = client.post(f"/care-patients/{patient['id']}/handoff-notes", json={
+        "tags": ["agitated"], "note": "Settled after a short walk.",
+    }, headers=helper_h).json()
+
+    assert client.get(f"/care-patients/{patient['id']}/handoff-notes", headers=stranger_h).status_code == 403
+    assert client.patch(
+        f"/care-patients/{patient['id']}/handoff-notes/{primary_note['id']}",
+        json={"tags": ["calm"], "note": "Helper edit"}, headers=helper_h,
+    ).status_code == 403
+    edited = client.patch(
+        f"/care-patients/{patient['id']}/handoff-notes/{helper_note['id']}",
+        json={"tags": ["calm"], "note": "Calm after a short walk."}, headers=helper_h,
+    )
+    assert edited.status_code == 200
+    assert edited.json()["tags"] == ["calm"]
+    assert client.delete(
+        f"/care-patients/{patient['id']}/handoff-notes/{helper_note['id']}", headers=primary_h,
+    ).status_code == 204
+    assert client.post(f"/care-patients/{patient['id']}/handoff-notes", json={
+        "tags": ["unsupported"], "note": "Bad tag",
+    }, headers=primary_h).status_code == 422
+    assert client.post(f"/care-patients/{patient['id']}/handoff-notes", json={
+        "tags": [], "note": "   ",
+    }, headers=primary_h).status_code == 422
+
+
+def test_daily_summary_uses_events_routine_and_shared_notes(client):
+    _, primary_h = _auth_user(client, "summary_primary")
+    _, helper_h = _auth_user(client, "summary_helper")
+    patient = client.post("/care-patients", json={"display_name": "Mom"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_summary_helper"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    today = now.replace(hour=0, minute=0)
+    slept = now - timedelta(hours=8)
+    woke = now
+    client.put(f"/care-patients/{patient['id']}/routine", json={
+        "usual_bedtime": slept.strftime("%H:%M"), "usual_wake_time": woke.strftime("%H:%M"),
+    }, headers=primary_h)
+
+    for event_type, event_time in [("slept", slept), ("woke", woke), ("napped", now - timedelta(hours=2)), ("agitated", now - timedelta(hours=1))]:
+        assert client.post(f"/care-patients/{patient['id']}/events", json={
+            "event_type": event_type, "event_time": event_time.isoformat(),
+        }, headers=helper_h).status_code == 201
+    client.post(f"/care-patients/{patient['id']}/handoff-notes", json={
+        "tags": ["calm"], "note": "Music helped after lunch.",
+    }, headers=helper_h)
+
+    result = client.get(f"/care-patients/{patient['id']}/daily-summaries?days=7", headers=primary_h)
+    assert result.status_code == 200
+    body = result.json()
+    assert body["learning_nights"] == 1
+    assert body["sufficient_data"] is False
+    sleep_day_index = 0 if slept.date() == today.date() else 1
+    sleep_day = body["days"][sleep_day_index]
+    assert sleep_day["sleep_minutes"] == 480
+    assert sleep_day["routine_status"] == "on_routine"
+    assert sum(day["nap_count"] for day in body["days"][:2]) == 1
+    assert sum(day["agitation_count"] for day in body["days"][:2]) == 1
+    assert body["days"][0]["handoff_note_count"] == 1
+    assert client.get(f"/care-patients/{patient['id']}/daily-summaries", headers=helper_h).status_code == 200
+
+
+def test_daily_summary_requires_membership_and_limits_history(client):
+    _, primary_h = _auth_user(client, "summary_owner")
+    _, stranger_h = _auth_user(client, "summary_stranger")
+    patient = client.post("/care-patients", json={"display_name": "Dad"}, headers=primary_h).json()
+    assert client.get(f"/care-patients/{patient['id']}/daily-summaries", headers=stranger_h).status_code == 403
+    result = client.get(f"/care-patients/{patient['id']}/daily-summaries?days=100", headers=primary_h)
+    assert result.status_code == 200
+    assert len(result.json()["days"]) == 30
+
+
+def test_caregiver_wellness_check_ins_are_private(client):
+    _, first_h = _auth_user(client, "wellness_first")
+    _, second_h = _auth_user(client, "wellness_second")
+    created = client.post("/care-patients/wellness/check-ins", json={
+        "feeling": "overwhelmed", "sleep_minutes": 270,
+        "broken_night": True, "note": "A difficult night",
+    }, headers=first_h)
+    assert created.status_code == 201
+    first = client.get("/care-patients/wellness/summary?days=7", headers=first_h)
+    assert first.status_code == 200
+    assert first.json()["average_sleep_minutes"] == 270
+    assert first.json()["broken_nights"] == 1
+    assert first.json()["hard_week"] is True
+    second = client.get("/care-patients/wellness/summary?days=7", headers=second_h)
+    assert second.status_code == 200
+    assert second.json()["check_ins"] == []
+    assert client.post("/care-patients/wellness/check-ins", json={
+        "feeling": "invalid", "sleep_minutes": 1500,
+    }, headers=first_h).status_code == 422
+
+
+def test_medication_schedule_permissions_and_shared_logging(client):
+    _, primary_h = _auth_user(client, "medication_primary")
+    helper, helper_h = _auth_user(client, "medication_helper")
+    _, stranger_h = _auth_user(client, "medication_stranger")
+    patient = client.post("/care-patients", json={"display_name": "Mom"}, headers=primary_h).json()
+    invite = client.post(
+        f"/care-patients/{patient['id']}/invitations",
+        json={"username": "user_medication_helper"}, headers=primary_h,
+    ).json()
+    client.post(f"/care-patients/invitations/{invite['id']}/accept", headers=helper_h)
+    payload = {
+        "name": "Morning medication", "instructions": "With breakfast",
+        "window_start": "08:00", "window_end": "09:00", "clinician_confirmed": True,
+    }
+    created = client.post(f"/care-patients/{patient['id']}/medications", json=payload, headers=primary_h)
+    assert created.status_code == 201
+    schedule = created.json()
+    assert "dose" not in schedule
+    assert client.post(f"/care-patients/{patient['id']}/medications", json=payload, headers=helper_h).status_code == 403
+    assert client.post(f"/care-patients/{patient['id']}/medications", json={
+        **payload, "clinician_confirmed": False,
+    }, headers=primary_h).status_code == 422
+    assert client.get(f"/care-patients/{patient['id']}/medications", headers=helper_h).status_code == 200
+    assert client.get(f"/care-patients/{patient['id']}/medications", headers=stranger_h).status_code == 403
+
+    logged = client.post(
+        f"/care-patients/{patient['id']}/medications/{schedule['id']}/logs",
+        json={"status": "taken", "occurred_at": datetime.now(timezone.utc).isoformat()},
+        headers=helper_h,
+    )
+    assert logged.status_code == 201
+    assert logged.json()["logged_by"]["id"] == helper["user"]["id"]
+    history = client.get(f"/care-patients/{patient['id']}/medication-logs", headers=primary_h)
+    assert history.status_code == 200
+    assert history.json()[0]["status"] == "taken"
+    assert client.post(
+        f"/care-patients/{patient['id']}/medications/{schedule['id']}/logs",
+        json={"status": "taken", "occurred_at": "2099-01-01T00:00:00Z"}, headers=helper_h,
+    ).status_code == 422

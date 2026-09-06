@@ -2,12 +2,15 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from passlib.context import CryptContext
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models import (
+    CarePatient,
+    CarePatientInvitation,
+    CarePatientMember,
     CaregiverLink,
     CaregiverMessage,
     CognitiveTest,
@@ -162,6 +165,31 @@ def delete_me(
     user_id = me.id
 
     try:
+        owned_patient_ids = [row.id for row in db.query(CarePatient.id).filter(
+            CarePatient.primary_caregiver_id == user_id
+        ).all()]
+        if owned_patient_ids:
+            db.query(CarePatientInvitation).filter(
+                CarePatientInvitation.patient_id.in_(owned_patient_ids)
+            ).delete(synchronize_session=False)
+            db.query(CarePatientMember).filter(
+                CarePatientMember.patient_id.in_(owned_patient_ids)
+            ).delete(synchronize_session=False)
+            db.query(CarePatient).filter(
+                CarePatient.id.in_(owned_patient_ids)
+            ).delete(synchronize_session=False)
+
+        db.query(CarePatientInvitation).filter(
+            or_(
+                CarePatientInvitation.invitee_user_id == user_id,
+                CarePatientInvitation.invited_by_user_id == user_id,
+                func.lower(CarePatientInvitation.invited_email) == me.email.lower(),
+            )
+        ).delete(synchronize_session=False)
+        db.query(CarePatientMember).filter(
+            CarePatientMember.user_id == user_id
+        ).delete(synchronize_session=False)
+
         related_links = db.query(CaregiverLink.id).filter(
             or_(
                 CaregiverLink.patient_id == user_id,
