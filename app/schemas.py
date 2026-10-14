@@ -312,12 +312,14 @@ class CarePatientInvitationOut(BaseModel):
 class CarePatientEventCreate(BaseModel):
     event_type: str = Field(..., pattern=r"^(slept|woke|napped|agitated|other)$")
     event_time: datetime
+    duration_min: Optional[int] = Field(None, ge=1, le=1440)
     note: Optional[str] = Field(None, max_length=255)
 
 
 class CarePatientEventUpdate(BaseModel):
     event_type: Optional[str] = Field(None, pattern=r"^(slept|woke|napped|agitated|other)$")
     event_time: Optional[datetime] = None
+    duration_min: Optional[int] = Field(None, ge=1, le=1440)
     note: Optional[str] = Field(None, max_length=255)
 
 
@@ -328,6 +330,7 @@ class CarePatientEventOut(BaseModel):
     logged_by: Optional[CaregiverUserOut]
     event_type: str
     event_time: datetime
+    duration_min: Optional[int] = Field(None, ge=1, le=1440)
     note: Optional[str]
     created_at: datetime
     updated_at: datetime

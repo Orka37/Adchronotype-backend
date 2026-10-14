@@ -7,6 +7,10 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, status
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, Field
+from app.services.google_identity import verify_google_identity
 
 from app.core.config import get_settings
 from app.core.deps import get_current_user
@@ -224,3 +228,52 @@ def logout(
 def check_username(username: str, db: Session = Depends(get_db)):
     taken = db.query(User).filter(User.username == username).first()
     return UsernameCheckResponse(available=taken is None)
+
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(min_length=1, max_length=16384)
+    current_password: str | None = Field(default=None, max_length=72)
+
+
+@router.post("/google", response_model=AuthResponse)
+def google_login(body: GoogleLoginRequest, db: Session = Depends(get_db)):
+    claims = verify_google_identity(body.id_token, cfg.GOOGLE_WEB_CLIENT_ID)
+    subject = claims["sub"]
+    email = claims["email"].strip().lower()
+    user = db.query(User).filter(User.google_subject == subject).first()
+    if user is None:
+        matches = db.query(User).filter(func.lower(User.email) == email).all()
+        if len(matches) > 1:
+            raise HTTPException(409, "Sign in with your existing username and password. Contact support to link Google.")
+        user = matches[0] if matches else None
+        if user:
+            if user.google_subject and user.google_subject != subject:
+                raise HTTPException(409, "This account is already linked to another Google account.")
+            # Linking requires proof of the existing account, even for verified Gmail.
+            try:
+                password_ok = bool(body.current_password) and _pwd.verify(body.current_password, user.password_hash)
+            except ValueError:
+                password_ok = False
+            if not password_ok:
+                raise HTTPException(409, "Enter your existing app password, then choose Sign in with Google again to link your account.")
+            if not user.is_active:
+                raise HTTPException(403, "account disabled")
+            user.google_subject = subject
+        else:
+            user = User(
+                google_subject=subject, email=email, is_active=True,
+                username="google_" + secrets.token_hex(12),
+                first_name=str(claims.get("given_name") or "Member")[:100],
+                last_name=str(claims.get("family_name") or "")[:100],
+                password_hash=_pwd.hash(secrets.token_urlsafe(32)),
+            )
+            db.add(user)
+    if not user.is_active:
+        raise HTTPException(403, "account disabled")
+    try:
+        db.commit()
+        db.refresh(user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Account changed while signing in. Please try again.")
+    return AuthResponse(user=_pub(user), tokens=_issue(user, db))

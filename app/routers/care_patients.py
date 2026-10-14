@@ -86,6 +86,7 @@ def _event_out(event: CarePatientEvent) -> CarePatientEventOut:
         event_type=event.event_type,
         event_time=event.event_time,
         note=event.note,
+        duration_min=event.duration_min,
         created_at=event.created_at,
         updated_at=event.updated_at,
     )
@@ -409,10 +410,13 @@ def create_event(body: CarePatientEventCreate, patient_id: UUID, db: Session = D
     event_time = body.event_time if body.event_time.tzinfo else body.event_time.replace(tzinfo=timezone.utc)
     if event_time > now + timedelta(minutes=5):
         raise HTTPException(status_code=422, detail="event time cannot be in the future")
+    if body.duration_min is not None and body.event_type != "napped":
+        raise HTTPException(status_code=422, detail="duration is only supported for naps")
     event = CarePatientEvent(
         patient_id=patient_id,
         logged_by_user_id=me.id,
         event_type=body.event_type,
+        duration_min=body.duration_min,
         event_time=event_time,
         note=body.note.strip() if body.note else None,
     )
@@ -451,14 +455,22 @@ def update_event(body: CarePatientEventUpdate, event_id: UUID, patient_id: UUID,
     if member.role != "primary" and event.logged_by_user_id != me.id:
         raise HTTPException(status_code=403, detail="helpers can only edit their own events")
     updates = body.model_dump(exclude_unset=True)
+    if any(key in updates and updates[key] is None for key in ("event_type", "event_time")):
+        raise HTTPException(status_code=422, detail="event type and time cannot be null")
+    if updates.get("duration_min") is not None and updates.get("event_type", event.event_type) != "napped":
+        raise HTTPException(status_code=422, detail="duration is only supported for naps")
     if "event_time" in updates:
         event_time = updates["event_time"]
         event_time = event_time if event_time.tzinfo else event_time.replace(tzinfo=timezone.utc)
         if event_time > datetime.now(timezone.utc) + timedelta(minutes=5):
             raise HTTPException(status_code=422, detail="event time cannot be in the future")
         event.event_time = event_time
+    if "duration_min" in updates:
+        event.duration_min = updates["duration_min"]
     if "event_type" in updates:
         event.event_type = updates["event_type"]
+        if event.event_type != "napped":
+            event.duration_min = None
     if "note" in updates:
         event.note = updates["note"].strip() if updates["note"] else None
     db.commit()

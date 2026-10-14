@@ -11,6 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import text
 
+from app.routers import care_recommendations
 from app.core.config import get_settings
 from app.database import engine
 from app.routers import auth, care_patients, caregivers, cognitive_tests, predictions, sleep_logs, users
@@ -100,6 +101,7 @@ app.include_router(sleep_logs.router)
 app.include_router(cognitive_tests.router)
 app.include_router(caregivers.router)
 app.include_router(care_patients.router)
+app.include_router(care_recommendations.router)
 
 
 @app.get("/", tags=["Health"])
