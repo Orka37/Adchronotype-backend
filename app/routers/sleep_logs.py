@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models import SleepLog, User
-from app.schemas import SleepLogIn, SleepLogOut
+from app.schemas import SleepLogIn, SleepLogOut, SleepRatingIn
 
 router = APIRouter(prefix="/sleep-logs", tags=["Sleep Logs"])
 logger = logging.getLogger("adchronotype.sleep_logs")
@@ -26,6 +26,7 @@ def create_log(
         wake_time=body.wake_time,
         duration_hours=body.duration_hours,
         quality_score=body.quality_score,
+        quality_scale=body.quality_scale,
         awakenings=body.awakenings,
         notes=body.notes,
         logged_date=body.logged_date,
@@ -43,17 +44,29 @@ def create_log(
     return rec
 
 
+@router.post("/ratings", response_model=SleepLogOut, status_code=201)
+def create_rating(
+    body: SleepRatingIn,
+    db: Session = Depends(get_db),
+    me: User = Depends(get_current_user),
+):
+    return create_log(body, db, me)
+
+
 @router.get("", response_model=List[SleepLogOut])
 def list_logs(
     page: int = Query(1, ge=1),
     page_size: int = Query(30, ge=1, le=100),
+    include_ratings: bool = False,
     db: Session = Depends(get_db),
     me: User = Depends(get_current_user),
 ):
+    query = db.query(SleepLog).filter(SleepLog.user_id == me.id)
+    # Older installed apps only understand the original 0–21 scale.
+    if not include_ratings:
+        query = query.filter(SleepLog.quality_scale == 'legacy_0_21')
     return (
-        db.query(SleepLog)
-        .filter(SleepLog.user_id == me.id)
-        .order_by(SleepLog.logged_date.desc())
+        query.order_by(SleepLog.logged_date.desc(), SleepLog.created_at.desc(), SleepLog.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -137,9 +137,15 @@ class SleepLogIn(BaseModel):
     wake_time:      str     = Field(..., pattern=r"^\d{2}:\d{2}$")
     duration_hours: float   = Field(..., ge=0.0, le=24.0)
     quality_score:  int     = Field(..., ge=0, le=21)
+    quality_scale: Literal['legacy_0_21'] = 'legacy_0_21'
     awakenings:     int     = Field(0, ge=0, le=20)
     notes:          Optional[str] = Field(None, max_length=500)
     logged_date:    datetime
+
+
+class SleepRatingIn(SleepLogIn):
+    quality_score: int = Field(..., ge=1, le=10)
+    quality_scale: Literal['rating_1_10'] = 'rating_1_10'
 
 
 class SleepLogOut(BaseModel):
@@ -148,6 +154,7 @@ class SleepLogOut(BaseModel):
     wake_time:      str
     duration_hours: float
     quality_score:  int
+    quality_scale: Literal['legacy_0_21', 'rating_1_10']
     awakenings:     int
     notes:          Optional[str]
     logged_date:    datetime

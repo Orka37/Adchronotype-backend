@@ -116,7 +116,8 @@ class SleepLog(Base):
     sleep_time     = Column(String(10), nullable=False)
     wake_time      = Column(String(10), nullable=False)
     duration_hours = Column(Float,   nullable=False)
-    quality_score  = Column(Integer, nullable=False)   # 0-21
+    quality_score  = Column(Integer, nullable=False)
+    quality_scale  = Column(String(20), nullable=False, default='legacy_0_21', server_default='legacy_0_21')
     awakenings     = Column(Integer, nullable=False, default=0)
     notes          = Column(Text, nullable=True)
     logged_date    = Column(DateTime(timezone=True), nullable=False)
