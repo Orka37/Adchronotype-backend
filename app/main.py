@@ -11,7 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import text
 
-from app.routers import care_recommendations
+from app.routers import care_recommendations, similarity
 from app.core.config import get_settings
 from app.database import engine
 from app.routers import auth, care_patients, caregivers, cognitive_tests, predictions, sleep_logs, users
@@ -97,6 +97,7 @@ async def _unhandled(request: Request, exc: Exception):
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(predictions.router)
+app.include_router(similarity.router)
 app.include_router(sleep_logs.router)
 app.include_router(cognitive_tests.router)
 app.include_router(caregivers.router)
