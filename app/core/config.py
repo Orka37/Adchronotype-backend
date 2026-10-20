@@ -1,4 +1,3 @@
-import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings
 
@@ -11,6 +10,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     PASSWORD_RESET_EXPIRE_MINUTES: int = 30
     GOOGLE_WEB_CLIENT_ID: str = ""
+    SIMILARITY_MODEL_PATH: str = ""
     RESEND_API_KEY: str = ""
     PASSWORD_RESET_FROM_EMAIL: str = ""
     FRONTEND_APP_URL: str = ""
@@ -28,7 +28,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self):
-        origins = [origin.strip().rstrip("/") for origin in self.FRONTEND_ORIGINS.split(",") if origin.strip()]
+        origins = [
+            origin.strip().rstrip("/")
+            for origin in self.FRONTEND_ORIGINS.split(",")
+            if origin.strip()
+        ]
         if self.FRONTEND_APP_URL:
             origins.append(self.FRONTEND_APP_URL.strip().rstrip("/"))
         return sorted(set(origins))
